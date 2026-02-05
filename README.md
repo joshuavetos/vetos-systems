@@ -1,6 +1,4 @@
-# Hi, I’m Josh.
-
-This repository is a public record of how I think, solve problems, and use AI.
+This repository is a public record of how I think, solve problems, and use AI to help in those processes.
 
 ### How I Work
 I work in AI/ML system design. I use LLMs aggressively as collaborators, but I treat them with skepticism. I don't use AI to "generate content"; I use it to stress-test ideas, explore failure modes, and accelerate the path to a workable solution.
