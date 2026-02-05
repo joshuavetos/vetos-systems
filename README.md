@@ -1,14 +1,22 @@
-This repository is a public record of how I think, solve problems, and use AI to help in those processes.
+# Engineering Log & Technical Artifacts
 
-### How I Work
-I work in AI/ML system design. I use LLMs aggressively as collaborators, but I treat them with skepticism. I don't use AI to "generate content"; I use it to stress-test ideas, explore failure modes, and accelerate the path to a workable solution.
+This repository is a record of my approach to system design, problem-solving, and the integration of probabilistic tools into deterministic workflows.
 
-I prioritize **Radical Simplicity**. If a solution is more complex than the problem it’s solving, I consider it a failure.
+### Operational Posture
+I focus on **AI/ML System Design** with an emphasis on **Epistemic Integrity**. My workflow utilizes Large Language Models (LLMs) as high-bandwidth collaborators for stress-testing and rapid prototyping, while maintaining a strict boundary between generated hypotheses and validated code.
 
-### Why This Repo Exists
-If you are evaluating me for a role, this space should answer three questions:
-1. Can I frame a problem clearly?
-2. Do I know when to stop trusting my tools?
-3. Am I comfortable killing my own ideas?
+* **Fail-Closed Design:** Systems are architected to refuse output by default if grounding or confidence thresholds are not met.
+* **Radical Simplicity:** I prioritize solutions where the technical overhead is lower than the problem’s complexity. 
+* **Adversarial Validation:** Every AI-assisted solution is treated as a hostile input until it passes deterministic validation layers.
 
-You won't find grand "visions" or complex frameworks here. You will find notes on what I’ve built, what I’ve broken, and—most importantly—what I’ve decided to throw away.
+### Evaluation Criteria
+For those auditing this repository for professional collaboration, these projects demonstrate:
+1. **Problem Framing:** Stripping complex requirements to a testable core.
+2. **Tool Skepticism:** Identifying exactly where probabilistic tools fail and building the guardrails to contain them.
+3. **Architectural Discipline:** The willingness to discard over-engineered or fragile solutions in favor of stability.
+
+---
+
+### Technical Artifacts
+* **[Municipal Budget Audit Pipeline](./tools/funding-analysis):** A financial auditor using Modified Z-Score (MAD) statistics and Pydantic schema enforcement to identify capital risk.
+* **[AI Failure Gates](./ai-failure-gates):** Behavioral rules and deterministic wrappers for preventing hallucination leakage in LLM outputs.
