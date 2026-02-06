@@ -1,3 +1,4 @@
+![A5A0A168-5DF1-47DC-A334-8A121E79A90F](https://github.com/user-attachments/assets/5a880f22-e208-4204-8576-2cef89e24d61)
 
 # Late-Stage Capitalism: Structural Systems Audit  
 **Joshua Scott Vetos | Feb 2026 | Audit Artifact**
