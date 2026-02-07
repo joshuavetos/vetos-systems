@@ -1,3 +1,5 @@
+<img width="1024" height="559" alt="05883C4A-AC79-4470-8DFE-CC365E3B3D63" src="https://github.com/user-attachments/assets/8e136804-b789-4fc3-afd4-d33f400f825a" />
+
 Dear Mr. Lacock,
 
 Please accept this correspondence as a formal public comment regarding the Shape Sioux Falls 2050 Comprehensive Development Plan (Draft dated December 22, 2025), submitted in advance of its final adoption.
