@@ -1,0 +1,54 @@
+{
+  "generated_at": "2026-02-07T19:25:52Z",
+  "class_counts": {
+    "IRREDUCIBLE_PROXY_SYSTEM": 1,
+    "CONTRACT/ACCESS": 4,
+    "INDETERMINATE": 3
+  },
+  "report": {
+    "ENERGY_ELCC": {
+      "baseline": {
+        "nameplate_MW": 217100,
+        "accredited_MW": 82061.0,
+        "ghost_pct": 62.2,
+        "signal_loss_ratio": 0.622
+      },
+      "dominance_MW_per_1pct": {
+        "Solar": 924.0,
+        "Wind": 452.0,
+        "Battery": 68.0,
+        "Thermal": 680.0,
+        "Nuclear": 47.0
+      },
+      "irreducible": {
+        "soft": true,
+        "hard": true
+      },
+      "classification": "IRREDUCIBLE_PROXY_SYSTEM"
+    },
+    "CAISO_ELCC": {
+      "status": "CONTRACT/ACCESS"
+    },
+    "PJM_ELCC": {
+      "status": "CONTRACT/ACCESS"
+    },
+    "ISO_NE_FCA": {
+      "status": "CONTRACT/ACCESS"
+    },
+    "MISO_LOLE": {
+      "status": "CONTRACT/ACCESS"
+    },
+    "ESG_RATINGS": {
+      "status": "PROXY_SIGNAL_DESTRUCTION"
+    },
+    "CREDIT_RATINGS": {
+      "status": "PROXY_SIGNAL_DESTRUCTION"
+    },
+    "UNIVERSITY_RANKINGS": {
+      "status": "PROXY_SIGNAL_DESTRUCTION"
+    },
+    "INSURANCE_RISK_MODELS": {
+      "status": "PROXY_SIGNAL_DESTRUCTION"
+    }
+  }
+}
