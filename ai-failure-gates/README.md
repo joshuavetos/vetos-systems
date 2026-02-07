@@ -373,3 +373,146 @@ No override is ever hidden or erased.
 - Termination is guaranteed
 
 This section is authoritative and supersedes local implementations.
+## 16. GLOBAL REGENERATION CAP (DEFAULT + RATIONALE)
+
+Default global regeneration cap = 2 × gate_count.
+
+This value is a **heuristic default**, not an empirical constant.
+Rationale: it permits (a) one full forward pass plus (b) one full corrective pass across the pipeline,
+while preventing “bounce loops” between coupled gates.
+
+Requirements:
+- The cap MUST be configurable per artifact type.
+- The cap MUST be recorded in the artifact’s context snapshot metadata.
+
+---
+
+## 17. OVERRIDE SPECIFICITY (REQUIRED FOR AUDIT)
+
+Overrides MUST be recorded with:
+- gate_id
+- check_id (optional if gate is single-check)
+- override_reason_code
+- operator_id (or system actor)
+- timestamp
+- justification_text (min length enforced)
+
+Final artifact MUST expose:
+- overall_status: CLEAN | OVERRIDDEN | FAILED
+- override_list: [ {gate_id, check_id?, reason_code, operator_id, timestamp} ... ]
+
+If Gate 2 is FORCE_PASS and Gate 3 fails normally:
+- artifact status = FAILED
+- override_list includes Gate 2 entry
+- failure_list includes Gate 3 failure entry
+Nothing is collapsed into a generic “OVERRIDDEN” flag.
+
+---
+
+## 18. GATE VERSION REVOCATION (KILL SWITCH)
+
+Every gate execution MUST record gate_id + gate_version in the artifact.
+
+A Gate Version Revocation List (GVRL) exists:
+- Entries: {gate_id, gate_version, revoked_at, severity, reason_code}
+
+Trust evaluation rule:
+- If any artifact references a revoked {gate_id, gate_version} → artifact status becomes REVOKED_TRUST
+  (distinct from FAILED; it means “was validated by a now-invalid validator”).
+
+Optional enforcement modes:
+- HARD: REVOKED_TRUST blocks all downstream use automatically
+- SOFT: REVOKED_TRUST warns and requires override to proceed
+
+Revalidation protocol:
+- Revalidation is performed only by creating a NEW evaluation run under a new context snapshot.
+- Prior artifacts are not mutated; they are superseded by lineage.
+
+---
+
+## 19. CONTEXT SNAPSHOT MANIFEST (REPRODUCIBILITY REQUIREMENT)
+
+Each artifact MUST carry a context_manifest, hashed and committed:
+
+context_manifest = {
+  artifact_type,
+  gate_order_version,
+  gates: [ {gate_id, gate_version, config_hash} ... ],
+  references: [ {name, version, content_hash} ... ],
+  schemas: [ {name, version, content_hash} ... ],
+  external_sources: [ {name, version_or_timestamp, content_hash_or_query_hash} ... ],
+  global_regen_cap,
+  per_gate_retry_budgets
+}
+
+context_snapshot_id = SHA256(canonical_json(context_manifest))
+
+audit_hash preimage MUST include:
+- input_fingerprint
+- context_snapshot_id
+- per-gate results (pass/fail/abstain)
+- override_list + failure_list
+- core output metrics
+
+Without context_snapshot_id in the commitment, “same input → same hash” is not guaranteed.
+
+---
+
+## 20. DELIBERATE REVALIDATION AGAINST NEW RULES (LINEAGE)
+
+Revalidating against updated rules is done by issuing a NEW artifact evaluation:
+- same inputs (or a declared input_delta)
+- new context_snapshot_id
+
+Lineage fields (required):
+- artifact_id
+- parent_artifact_id (nullable)
+- lineage_reason: POLICY_UPDATE | GATE_UPDATE | BUG_REVOCATION | OPERATOR_REQUEST
+- supersedes: [artifact_id ...] (optional)
+
+Supersession semantics:
+- “superseded” does not delete or invalidate history
+- it indicates “preferred current evaluation under newer context”
+
+---
+
+## 21. PARTIAL CONTEXT UPDATES (MODEL)
+
+Model = component-wise versioning with an atomic manifest.
+
+Meaning:
+- individual components (policy, legal refs, schemas, data source definitions) have their own versions/hashes
+- any change to any component produces a NEW context_snapshot_id
+- snapshots are atomic at the manifest level
+
+This preserves granular provenance without allowing mixed “live” context during a run.
+
+---
+
+## 22. GATE ORDERING CHANGES (MIGRATION PROTOCOL)
+
+Gate order is immutable per artifact_type + gate_order_version.
+
+Changing order requires:
+- new gate_order_version
+- new context_snapshot_id
+- new evaluation run (lineage parent points to prior artifact)
+
+No artifact is silently “migrated” in place.
+
+---
+
+## 23. OVERRIDE GRANULARITY (CHECK-LEVEL OVERRIDES)
+
+Gates with multiple checks MUST expose stable check_id values.
+
+Override may target:
+- entire gate (gate-level override)
+- specific check_id (check-level override)
+
+The smallest override scope MUST be preferred.
+
+Final artifact must therefore support:
+override_list entries with optional check_id:
+- OVERRIDDEN: Legal.StateLaw42
+- without implying OVERRIDDEN: Legal (entire gate)
