@@ -12,6 +12,8 @@ This artifact closes the audit space by collapsing all domain audits into a sing
 
 ## Systemic Failure Grammar (Semantic Ontology — JSON-LD)
 
+<details>
+<summary><strong>Systemic Failure Grammar (JSON-LD)</strong></summary>
 {
   "@context": {
     "sys": "http://audit.topology/schema#",
@@ -23,19 +25,19 @@ This artifact closes the audit space by collapsing all domain audits into a sing
     {
       "@id": "sys:ExtractiveSystem",
       "@type": "owl:Class",
-      "comment": "Any institutional architecture optimizing for safety of rejection over responsibility of acceptance."
+      "comment": "Any institutional architecture that prioritizes safety of rejection over responsibility of acceptance."
     },
     {
       "@id": "sys:Operator",
       "@type": "owl:Class",
       "subClassOf": "sys:ExtractiveSystem",
-      "comment": "Invariant mechanisms that drive systemic failure."
+      "comment": "Invariant mechanisms that govern systemic failure behavior."
     },
     {
       "@id": "sys:ConservationLaw",
       "@type": "sys:Axiom",
       "value": "dR_s / dA_r > 0",
-      "definition": "As responsibility of acceptance increases, systems increase rejection to preserve safety."
+      "definition": "As responsibility of acceptance increases, systems increase rejection to preserve institutional safety."
     },
     {
       "@id": "sys:GatekeepingLogic",
@@ -80,8 +82,6 @@ This artifact closes the audit space by collapsing all domain audits into a sing
   ]
 }
 
----
-
 ## Example System Mapping (Classifier Instance)
 
 {
@@ -120,7 +120,7 @@ This artifact closes the audit space by collapsing all domain audits into a sing
   },
   "status": "Stable Extractive Equilibrium"
 }
-
+</details>
 ---
 
 ## The Invariant Laws of Extractive Systems
