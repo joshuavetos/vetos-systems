@@ -1,0 +1,7 @@
+ticker,company,sec_status,sec_form,sec_filing_date,disclosure_hits_per_10k_words,opacity_index,classification,sec_source_url
+META,Meta Platforms Inc,OK,10-K,2026-01-29,0.490,0.9918,PROXY_SIGNAL_DESTRUCTION,https://www.sec.gov/Archives/edgar/data/1326801/000162828026003942/meta-20251231.htm
+UNH,UnitedHealth Group Inc,OK,10-K,2025-02-27,0.588,0.9902,PROXY_SIGNAL_DESTRUCTION,https://www.sec.gov/Archives/edgar/data/731766/000073176625000063/unh-20241231.htm
+AAPL,Apple Inc,OK,10-K,2025-10-31,0.611,0.9898,PROXY_SIGNAL_DESTRUCTION,https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm
+GOOGL,Alphabet Inc,OK,10-K,2026-02-05,1.431,0.9762,PROXY_SIGNAL_DESTRUCTION,https://www.sec.gov/Archives/edgar/data/1652044/000165204426000018/goog-20251231.htm
+TSLA,Tesla Inc,OK,10-K,2026-01-29,1.745,0.9709,PROXY_SIGNAL_DESTRUCTION,https://www.sec.gov/Archives/edgar/data/1318605/000162828026003952/tsla-20251231.htm
+XOM,Exxon Mobil Corp,OK,10-K,2025-02-19,35.842,0.4026,CONTRACT_OK,https://www.sec.gov/Archives/edgar/data/34088/000003408825000010/xom-20241231.htm
