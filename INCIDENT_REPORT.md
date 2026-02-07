@@ -97,3 +97,37 @@ This incident establishes the requirement for:
 
 This incident justifies the defensive architecture implemented in subsequent audit gates.  
 No further remediation required unless mean-based models are reintroduced.
+## Incident Follow-Up — Statistical Failure Closure
+
+### Detection Timeline
+- The mean-based audit logic operated across multiple planning cycles without detection.
+- Discovery occurred during a secondary discrepancy review when a capital-intensive project appeared statistically “normal” despite dominating total allocation.
+- Routine audits did not flag the issue because the methodology itself was treated as authoritative.
+
+### Downstream Impact
+- At least one plan advanced beyond approval under false statistical legitimacy.
+- Planning actions were initiated based on the approval; full execution was bounded but non-zero.
+- No automated rollback mechanism existed because approval implied correctness.
+
+### Appeals Were Structurally Impossible
+- No formal appeal was filed.
+- The system provided no mechanism to challenge an approved artifact.
+- Once marked PASS, there was no review surface to question statistical legitimacy.
+- Appeals were structurally blocked by design, not by process failure.
+
+### Current Safeguards
+- The MAD-based (median-anchored) approach has been tested against synthetic power-law distributions.
+- Megaproject concentration is reliably flagged under adversarial distribution shaping.
+- Red-team testing now targets distribution manipulation rather than single outliers.
+
+### Generalized Failure Pattern
+This incident is not budget-specific. The same failure class has been observed in:
+- Hiring score normalization
+- Risk aggregation models
+- KPI rollups
+- AI evaluation benchmarks
+
+**Invariant:**
+When legitimacy is derived from standard methodology, and that methodology is non-robust, failure becomes invisible.
+
+This incident represents a methodological trust failure, not a data quality issue.
