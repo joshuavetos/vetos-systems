@@ -1,105 +1,93 @@
-# Engineering Log & Technical Artifacts
+# Human–AI Leverage: Failure-First Portfolio
 
-This repository documents my approach to system design, validation, and applied AI tooling, with an emphasis on building deterministic systems that safely incorporate probabilistic components.
+This repository is **not a demo reel**.  
+It is a **laboratory notebook** proving operational competence in human–AI leverage.
 
-The contents here are not demos or experiments in isolation. Each artifact represents a working system, constraint, or validation layer that has been designed, tested, and retained because it performs reliably under real conditions.
+Real competence is demonstrated only when systems:
+- fail visibly,
+- log those failures,
+- repair them using AI tools,
+- and quantify improvement with calibrated metrics.
 
----
-
-## Scope & Intent
-
-This repository serves three purposes:
-
-1. Record — A durable log of engineering decisions, tradeoffs, and validated implementations.
-2. Demonstration — Concrete examples of how probabilistic tools (e.g., LLMs) can be integrated without compromising correctness or trust.
-3. Evaluation — A reference for collaborators, reviewers, or employers assessing architectural judgment, not just output quality.
-
-This is not a tutorial repository and is not optimized for beginner onboarding.
-It is intended for readers familiar with software systems, validation, and risk-aware design.
+Any artifact that does not expose baselines, breakdowns, and verification is considered **incomplete by design**.
 
 ---
 
-## Operational Posture
+## What This Repo Proves (and What It Does Not)
 
-My work operates under a small set of enforced design principles:
+**This repo proves:**
+- Mastery of AI-augmented cognition (LLMs, search, code execution, multimodality)
+- Systematic handling of ambiguity, uncertainty, and failure
+- Tool orchestration across multiple steps and models
+- Verification, calibration, and adversarial self-critique
 
-### Fail-Closed by Default
+**This repo does NOT attempt to prove:**
+- Custom model training
+- Benchmark leaderboard performance
+- Production deployment resilience (only simulated proxies)
 
-Systems are designed to refuse output unless minimum grounding, validation, or confidence conditions are met. Silence or refusal is treated as a successful terminal state.
-
-### Deterministic Boundaries Around Probabilistic Tools
-
-LLMs and other probabilistic systems are used as high-bandwidth collaborators, not authorities. All generated output is treated as hostile input until it passes deterministic validation layers.
-
-### Radical Simplicity
-
-If a solution introduces more complexity than the problem it addresses, it is discarded. Preference is given to mechanisms that are inspectable, bounded, and difficult to misuse.
-
-### Adversarial Validation
-
-Every component is assumed to fail in the least convenient way. Designs are stress-tested against misuse, malformed inputs, environmental mismatch, and silent-failure modes.
+Static repositories cannot prove runtime emergence; this repo uses falsifiable proxies where necessary.
 
 ---
 
-## What This Repository Demonstrates
+## Evaluation Standard (Non-Negotiable)
 
-For reviewers evaluating this work for professional collaboration, the artifacts here demonstrate:
+All domains follow the same epistemic sequence:
 
-- Problem Framing  
-  Reducing ambiguous or high-level requirements into testable, enforceable constraints.
+**Baseline Failure → Tool Augmentation → Adversarial Critique → Repair → Calibration**
 
-- Tool Skepticism  
-  Identifying where probabilistic tools break down and designing explicit containment strategies rather than relying on prompt quality or “best effort” behavior.
-
-- Architectural Discipline  
-  Willingness to remove features, abstractions, or automation when they weaken determinism, auditability, or long-term stability.
-
-- Operational Realism  
-  Attention to real failure modes: environment mismatch, encoding errors, filesystem constraints, and silent runtime failures.
+Any artifact skipping a stage is invalid.
 
 ---
 
-## Technical Artifacts
+## Competency Domains
 
-The following directories contain complete, runnable systems with their own documentation and validation logic:
+| Domain | Real Competence | Fake / Shallow | Minimum Required Artifacts | Static Repo Viable |
+|------|---------------|----------------|----------------------------|-------------------|
+| Rapid Knowledge Synthesis | Resolve contradictions across 50+ sources with gaps flagged | Unverified summaries | Query logs, source diffs, resolution tables, uncertainty scores | Yes |
+| Multi-Step Tool Orchestration | ≥80% success on 20 seeded tasks chaining ≥5 tools | One-off screenshots | Runnable scripts, JSON traces, task suites | Yes |
+| Adversarial Querying | <10% attack success after mitigation on 100+ prompts | Happy-path safety demos | Red-team YAML, ASR tables, mitigation diffs | Yes |
+| Mechanistic Reasoning | ≥90% fidelity causal edits (open models) | Chain-of-thought only | Edit scripts, pre/post tests, circuit proxies | Partial |
+| Temporal / Multiscale Reasoning | ≥20% improvement over baseline under drift | Static reasoning | Drift simulations, trajectory logs | Yes |
+| Multimodal Synthesis | ≥95% inconsistency detection across modalities | Isolated captions | Fusion pipelines, failure galleries | Yes |
+| Code Generation & Debugging | ≥90% test pass on ≥1k LOC | Toy scripts | Git-annotated diffs, pytest suites | Yes |
+| Epistemic Auditing | Brier score <0.15 on held-out queries | Unqualified answers | Calibration plots, plated outputs | Yes |
 
-- Municipal Budget Audit Pipeline  
-  ./tools/funding-analysis  
-  A financial auditing pipeline using Modified Z-Score (MAD) statistics and schema enforcement to identify capital allocation risk and temporal inconsistencies in public planning documents.
-
-- AI Failure Gates  
-  ./ai-failure-gates  
-  Deterministic gating and validation components designed to prevent hallucination leakage, ungrounded output, and silent failure in LLM-assisted workflows.
-
-Each artifact directory is self-contained and includes:
-- a clear execution model
-- explicit failure behavior
-- first-class telemetry or rejection logs
-- documentation describing what the system refuses to do
+If any domain lacks its minimum artifacts, **competence is not demonstrated**.
 
 ---
 
-## Non-Goals
+## Canonical Failure-First Artifact
 
-To avoid ambiguity, this repository explicitly does not aim to:
+All work in this repo must reduce to the following pattern.
 
-- Showcase prompt engineering as a primary skill
-- Provide generic AI demos
-- Optimize for aesthetic novelty
-- Hide uncertainty behind probabilistic confidence language
+Reference notebook:  
+`/reference/failure_first_template.ipynb`
 
-If a system cannot be made reliable, it is excluded.
+### Example Task
+> Quantify 2025 AI hiring shifts, predict 2026 trends, and flag risks using public data.
 
----
+```python
+# Step 1 — Naive Attempt (Expected Failure)
+output = llm("Summarize 2025 AI hiring trends.")
+log = {"failure": "unsourced claims", "confidence": 1.0}
+baseline_accuracy = 0.2
 
-## Usage & Reuse
+# Step 2 — Failure Analysis
+issues = ["no verification", "recency bias", "no quantification"]
 
-Code in this repository may be reviewed, reused, or adapted with attribution where appropriate.
-No guarantees are made regarding fitness for production use without independent validation.
+# Step 3 — Tool Chain
+data = search(...) + code_exec(...)
+output2 = llm.synthesis(data)
+log = {"failure": "outlier sensitivity"}
 
----
+# Step 4 — Adversarial Critique
+critic = llm("Attack this analysis.")
+mitigations = ["drift tests", "cross-model check"]
 
-## Contact & Collaboration
+# Step 5 — Repair via Orchestration
+agent = ToolChain([...], retries=3)
+final = agent.run(task)
 
-This repository is best evaluated by reading the artifacts directly.
-If you are interested in collaboration or review, context-specific discussion is preferred over general inquiries.
+# Step 6 — Calibration
+brier = compute_brier(final.confidence, ground_truth)
