@@ -1,8 +1,10 @@
 <img width="1024" height="559" alt="DBD31CA6-EB5E-43BA-B8D3-CA26A99E9EF4" src="https://github.com/user-attachments/assets/b79e0b0c-6366-4323-a630-768fa92ff026" />
+<img width="1024" height="572" alt="E397FAE8-DBEE-4E22-8148-F881727C2082" src="https://github.com/user-attachments/assets/bb283bb1-3cff-4844-af70-b95b2782b5be" />
 
-## Adult Hippocampal Neurogenesis — Systems‑Level Visualization
 
-This figure presents a unified, multi‑layer systems‑biology model of adult neurogenesis in the dentate gyrus subgranular zone (SGZ). Unlike traditional stage‑based cartoons, this visualization integrates spatial anatomy, lineage progression, regulatory signaling, temporal dynamics, uncertainty encoding, and functional output into a single coherent framework.
+## Adult Hippocampal Neurogenesis — Systems‑Level Visualizations
+
+These figures present a unified, multi‑layer systems‑biology model of adult neurogenesis in the dentate gyrus subgranular zone (SGZ). Unlike traditional stage‑based cartoons, these visualizations integrate spatial anatomy, lineage progression, regulatory signaling, temporal dynamics, uncertainty encoding, and functional output into a single coherent framework.
 
 ### **1. Spatial Anatomy (Bottom Layer)**
 The base layer depicts an anatomically grounded cross‑section of the SGZ, including:
@@ -67,4 +69,4 @@ Debated or low‑confidence steps are represented with semi‑transparent overla
 
 ---
 
-This visualization functions as a comprehensive systems‑level map of adult hippocampal neurogenesis, integrating structure, mechanism, regulation, probability, and function into a single, publication‑grade figure.
+These visualizations function as a comprehensive systems‑level map of adult hippocampal neurogenesis, integrating structure, mechanism, regulation, probability, and function into single figures.
