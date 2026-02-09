@@ -91,3 +91,14 @@ final = agent.run(task)
 
 # Step 6 — Calibration
 brier = compute_brier(final.confidence, ground_truth)
+---
+
+## Closing Note
+
+This repository documents ways of thinking with AI, not finished answers.
+
+Artifacts may be rough, incomplete, or exploratory by design. The focus is on testing ideas, exposing failure, and revising assumptions when reality disagrees.
+
+Structure varies because problems vary. Rigor, curiosity, and verification are the through-line.
+
+This is not a catalog of conclusions, but a record of how understanding was pursued.
