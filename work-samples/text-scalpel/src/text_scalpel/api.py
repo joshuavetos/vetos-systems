@@ -3,14 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from .core import ScalpelEngine
 
-app = FastAPI(title="Text Scalpel API")
+app = FastAPI(title="Text Scalpel API", version="3.0.0")
 
-# HARDENING: In production, replace ["*"] with your specific frontend URLs
-ALLOWED_ORIGINS = ["*"]
-
+# Configure CORS to allow your React frontend to communicate with this API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"], # In production, replace with your specific domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
