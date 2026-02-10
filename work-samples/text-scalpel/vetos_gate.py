@@ -1,65 +1,40 @@
-# text_scalpel/vetos_gate.py
+# vetos_gate.py
 
-import ast
-import json
-import hashlib
-import time
+import json, sys, time, hashlib
 
-def now_utc():
+RECEIPT_FILE = "receipt.qual.json"
+SCHEMA_URI = "exq://spec/v1"
+
+def now():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-def sha256(s: str) -> str:
-    return hashlib.sha256(s.encode()).hexdigest()
+def sha256(obj):
+    return hashlib.sha256(json.dumps(obj, sort_keys=True).encode()).hexdigest()
 
-def vetos_qualify(original: str, modified: str, payload: str):
-    evidence = []
-
-    # -------------------------
-    # Q1 — Conservation
-    # -------------------------
-    in_lines = len(original.splitlines())
-    out_lines = len(modified.splitlines())
-    inserted = len(payload.splitlines())
-
-    q1_ok = (out_lines == in_lines + inserted)
-    q1_ev = {
-        "law": "Q1_Conservation",
-        "input_lines": in_lines,
-        "output_lines": out_lines,
-        "inserted_lines": inserted,
-        "delta": out_lines - (in_lines + inserted),
-    }
-    evidence.append(q1_ev)
-
-    # -------------------------
-    # Q3 — Integrity (syntax)
-    # -------------------------
-    try:
-        ast.parse(modified)
-        q3_ok = True
-        q3_ev = {"law": "Q3_Integrity", "syntax": "valid"}
-    except SyntaxError as e:
-        q3_ok = False
-        q3_ev = {"law": "Q3_Integrity", "error": str(e)}
-
-    evidence.append(q3_ev)
-
-    qualified = q1_ok and q3_ok
+def vetos_guard(*, law, claim, ok, evidence):
+    """
+    Hard gate. If ok == False, side effects are forbidden.
+    """
+    if ok:
+        return  # ALLOW
 
     receipt = {
-        "schema": "exq://spec/v1",
-        "timestamp": now_utc(),
-        "status": "QUALIFIED" if qualified else "FAILED",
-        "violations": [
-            ev["law"] for ev, ok in zip(evidence, [q1_ok, q3_ok]) if not ok
-        ],
-        "evidence": [
-            {**ev, "hash": sha256(json.dumps(ev, sort_keys=True))}
-            for ev in evidence
-        ],
+        "schema": SCHEMA_URI,
+        "timestamp": now(),
+        "status": "FAILED",
+        "violations": [law],
+        "evidence": [{
+            "law": law,
+            "claim": claim,
+            "observed": evidence,
+            "hash": sha256(evidence),
+        }]
     }
 
-    with open("receipt.qual.json", "w") as f:
+    with open(RECEIPT_FILE, "w") as f:
         json.dump(receipt, f, indent=2)
 
-    return qualified
+    print(f"[VETOS] ❌ {law} violation — write blocked")
+    print(f"[VETOS] Receipt written → {RECEIPT_FILE}")
+
+    sys.exit(1)
