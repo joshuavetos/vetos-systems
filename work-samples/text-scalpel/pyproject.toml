@@ -7,7 +7,7 @@ name = "text_scalpel"
 version = "3.0.0"
 description = "Enterprise Code Injection Engine for surgical source code modifications."
 authors = [
-    { name="Developer", email="jsvetos90@gmail.com" }
+    { name="Joshua Vetos", email="your.email@example.com" }
 ]
 readme = "README.md"
 requires-python = ">=3.8"
@@ -24,5 +24,4 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/vetos-systems/text-scalpel"
-"Bug Tracker" = "https://github.com/vetos-systems/text-scalpel/issues"
+"Homepage" = "https://github.com/joshuavetos/vetos-systems"
