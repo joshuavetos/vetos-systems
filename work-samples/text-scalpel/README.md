@@ -10,3 +10,6 @@ A surgical code injection engine designed for deterministic, indentation-aware s
 ## Installation
 ```bash
 pip install .
+Quick Start (API)
+python main.py
+The server will start at http://0.0.0.0:8000.
