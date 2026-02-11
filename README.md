@@ -1,3 +1,5 @@
+<img width="1536" height="1024" alt="80B1F0DD-9449-40A3-9FA6-F348CB351E3E" src="https://github.com/user-attachments/assets/3205e20d-28a9-4c93-9b32-e56715847778" />
+
 # Vetos Systems: The Fail-Closed Governance Stack
 
 **A repository documenting how complex AI and industrial systems are audited, constrained, and deliberately halted when certainty is insufficient.**
