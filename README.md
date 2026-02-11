@@ -4,7 +4,7 @@
 
 ---
 
-## 🛠 Philosophy: Reliability Over Appearance
+## Philosophy: Reliability Over Appearance
 
 This repository serves as a living record of technical competency. It documents how complex systems—from industrial automation to macro-financial engines—are audited, constrained, and forced into a safe state when certainty is insufficient.
 
@@ -16,7 +16,7 @@ In high-consequence environments, failure is not just a bug; it is a structural 
 
 ---
 
-## 🏗 Featured Engineering Artifacts
+## Featured Engineering Artifacts
 
 ### 1. Macro Regime Detection & Risk Monitoring
 **Location:** `tools/macro_engine_v2.py`
@@ -36,9 +36,9 @@ Concrete implementations of safety layers for autonomous and industrial systems.
 
 ---
 
-## 🚫 Operating Standard
+## Operating Standard
 
 This is a working record of **Constraint Enforcement**. It documents the defensive architecture and reliability engineering required to make autonomous systems safe for real-world deployment in banking, energy, and industrial sectors.
 
 ---
-**Maintained by Josh Vetos | 2026**
+**Maintained by Joshua Scott Vetos | 2026**
