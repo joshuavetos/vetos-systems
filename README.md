@@ -1,5 +1,10 @@
 # Vetos Systems: Engineering & Reliability Portfolio
 
+![System Architecture](https://img.shields.io/badge/Architecture-Fail--Closed-critical?style=flat-square)
+![Domain](https://img.shields.io/badge/Domain-Banking_%7C_Industrial_%7C_Macro-0055BB?style=flat-square)
+![Audit Status](https://img.shields.io/badge/Audit_Status-Continuous-success?style=flat-square)
+![Stack](https://img.shields.io/badge/Tech_Stack-Python_%7C_Solidity_%7C_Z3-333333?style=flat-square)
+
 **A collection of structural engineering artifacts, autonomous systems architecture, and deterministic governance frameworks.**
 
 ---
