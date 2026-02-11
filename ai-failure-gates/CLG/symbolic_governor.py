@@ -1,57 +1,83 @@
 from z3 import *
 import json
+import time
 
-class UltraGovernor:
+class UnifiedGovernor:
     """
-    Stateful Neuro-Symbolic Governor.
-    Enforces daily budget, multi-tier RBAC, and auth-levels via SMT.
+    VETOS INDUSTRIAL PROTOCOL v1.2
+    Combines Linguistic Certainty (G1), Mathematical RBAC (G2), 
+    and Transaction Conservation (G3).
     """
     def __init__(self, daily_budget=5000):
         self.s = Solver()
         self.daily_budget = daily_budget
         self.cumulative_spend = 0
         
-        # Symbols
-        self.status = String('Account.status')
-        self.balance = Int('Account.balance')
+        # State Symbols
+        self.balance = Int('balance')
         self.amount = Int('amount')
-        self.tier = String('User.tier')
-        self.auth_level = Int('auth_level')
-        self.total_spent = Int('total_spent')
+        self.tier = String('tier')
+        self.status = String('status')
 
-    def validate_request(self, req):
+    def qualify_execution(self, req, tx_data):
+        """
+        G3: Conservation & Completeness Audit
+        Directly integrated from vetos_proof_003.
+        """
+        violations = []
+        # Q2: Completeness Check
+        if set(tx_data['declared']) != set(tx_data['executed']):
+            violations.append("Q2_COMPLETENESS_FAILURE")
+        
+        # Q1: Conservation Check
+        if tx_data['incoming'] != tx_data['outgoing']:
+            violations.append("Q1_CONSERVATION_FAILURE")
+            
+        return violations
+
+    def authorize(self, payload, tx_context):
         self.s.push()
         
-        # Universal Constraints
+        # 1. Add Universal Laws (Z3)
         self.s.add(self.balance >= 0)
-        self.s.add(Or(self.status == StringVal("ACTIVE"), self.status == StringVal("FROZEN")))
-        
-        # Multi-Tier RBAC Laws
         self.s.add(Implies(self.tier == StringVal("STANDARD"), self.amount <= 100))
-        self.s.add(Implies(self.tier == StringVal("VIP"), self.amount <= 10000))
+        self.s.add(self.cumulative_spend + self.amount <= self.daily_budget)
         
-        # Temporal Burn-Rate Law
-        self.s.add(self.total_spent + self.amount <= self.daily_budget)
-        
-        # Auth-Gating Law
-        self.s.add(Implies(self.status == StringVal("FROZEN"), self.auth_level > 5))
+        # 2. Inject Runtime Context
+        self.s.add(self.balance == payload['balance'])
+        self.s.add(self.amount == payload['amount'])
+        self.s.add(self.tier == StringVal(payload['tier']))
+        self.s.add(self.status == StringVal(payload['status']))
 
-        # Inject Request State
-        self.s.add(self.status == StringVal(req['status']))
-        self.s.add(self.balance == req['balance'])
-        self.s.add(self.tier == StringVal(req['tier']))
-        self.s.add(self.auth_level == req.get('auth', 1))
-        self.s.add(self.total_spent == self.cumulative_spend)
-        self.s.add(self.amount == req['amount'])
+        # 3. Decision Matrix
+        z3_check = self.s.check()
+        qual_violations = self.qualify_execution(payload, tx_context)
         
-        if self.s.check() == unsat:
-            self.s.pop()
-            return {
-                "verdict": "REJECTED",
-                "reason": "Mathematical Constraint Violation",
-                "state": {"current_burn": self.cumulative_spend, "limit": self.daily_budget}
+        if z3_check == unsat or qual_violations:
+            result = {
+                "verdict": "FAIL_CLOSED",
+                "audit": {
+                    "logic_gate": "PASSED" if z3_check == sat else "FAILED",
+                    "conservation_gate": "PASSED" if not qual_violations else "FAILED",
+                    "violations": qual_violations
+                }
             }
-        
-        self.cumulative_spend += req['amount']
+            self.s.pop()
+            return result
+
+        # 4. Commit State
+        self.cumulative_spend += payload['amount']
         self.s.pop()
-        return {"verdict": "APPROVED", "new_burn_total": self.cumulative_spend}
+        return {"verdict": "QUALIFIED", "new_burn": self.cumulative_spend}
+
+# --- PROOF EXECUTION ---
+# Case: VIP User attempting spend, but Transaction Completeness fails (Stage skipped)
+gov = UnifiedGovernor()
+req = {"balance": 10000, "amount": 500, "tier": "VIP", "status": "ACTIVE"}
+tx_context = {
+    "declared": ["validate", "authorize", "settle", "record"],
+    "executed": ["validate", "authorize", "settle"], # 'record' missing
+    "incoming": 500, "outgoing": 500
+}
+
+print(json.dumps(gov.authorize(req, tx_context), indent=2))
