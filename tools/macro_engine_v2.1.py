@@ -1,73 +1,47 @@
-import numpy as np
+import yfinance as yf
 import pandas as pd
+import numpy as np
 from arch import arch_model
 from fredapi import Fred
-import hashlib
 
-def run_upgraded_engine(df, FRED_API_KEY, START, END):
+class VetosProportionalController:
     """
-    VETOS Macro Engine v2.1: Regime Detection & Risk Quarantine
-    Logic: (GARCH Volatility Surface) + (Liquidity Velocity) + (Structural Hysteresis)
+    VETOS v6.0: Proportional Risk Controller
+    Implements Recursive GARCH Mean-Reversion and Cross-Asset 'Bond Trap' Detection.
     """
-    # --- 1. Signal Preparation ---
-    df = df.copy()
-    df['sp_ret'] = df['sp500'].pct_change()
-    
-    # Baseline 12-month Rolling Stats for Z-Scoring
-    rolling_window = 12
-    df['vol_baseline'] = df['sp_ret'].rolling(6).std()
-    
-    # --- 2. Advanced Liquidity Plumbing ---
-    # Net Liquidity = (Fed Total Assets) - (TGA Balance) - (Reverse Repo)
-    # This is the 'True' liquidity available for market absorption.
-    fred = Fred(api_key=FRED_API_KEY)
-    
-    tga = fred.get_series('WTREGEN', observation_start=START, observation_end=END).resample('ME').last()
-    rrp = fred.get_series('RRPONTSYD', observation_start=START, observation_end=END).resample('ME').last()
-    
-    # Net Liquidity Level
-    df['net_liquidity'] = df['fed_assets'] - tga.reindex(df.index, method='ffill') - rrp.reindex(df.index, method='ffill')
-    
-    # Net Liquidity Z-Score (The Level)
-    df['liq_z'] = (df['net_liquidity'] - df['net_liquidity'].rolling(rolling_window).mean()) / \
-                  df['net_liquidity'].rolling(rolling_window).std()
-    
-    # Net Liquidity Velocity (The Acceleration of the drain)
-    # Identifies 'Predictive' stress before price realization.
-    df['liq_velocity'] = df['liq_z'].diff(2) 
+    def __init__(self, api_key: str):
+        self.fred = Fred(api_key=api_key)
 
-    # --- 3. GARCH(1,1) Volatility Surface ---
-    # Identifies 'Reactive' regime shifts where volatility is clustering.
-    garch_input = df['sp_ret'].dropna() * 100
-    am = arch_model(garch_input, vol='Garch', p=1, q=1, dist='Normal')
-    res = am.fit(disp='off')
-    
-    # Map GARCH volatility back to the main dataframe
-    df.loc[garch_input.index, 'garch_vol'] = res.conditional_volatility / 100
+    def run_engine(self, start_date: str, end_date: str):
+        # 1. Fetch Multi-Asset Stack
+        tickers = ["SPY", "TLT", "DX-Y.NYB"]
+        raw_data = yf.download(tickers, start=start_date, end=end_date, auto_adjust=True)
+        df = raw_data['Close'].rename(columns={"DX-Y.NYB": "DXY"}).dropna()
+        rets = df.pct_change().dropna()
 
-    # --- 4. Deterministic Veto Logic (The Gate) ---
-    # Trigger 1: Volatility > Historical Baseline (Confirmation)
-    # Trigger 2: Liquidity < -1.5 Sigma (Structural Stress)
-    # Trigger 3: Liquidity Velocity < -1.0 (Rapid Drain)
-    
-    df['raw_signal'] = (
-        (df['garch_vol'] > df['vol_baseline'].rolling(rolling_window).mean()) | 
-        (df['liq_z'] < -1.5) |
-        (df['liq_velocity'] < -1.0)
-    )
+        # 2. Recursive GARCH Mean-Reversion (Vol Targeting)
+        garch_input = rets['SPY'] * 100
+        am = arch_model(garch_input, vol='Garch', p=1, q=1, dist='Normal')
+        res = am.fit(disp='off')
+        
+        df['current_vol'] = (res.conditional_volatility / 100) * np.sqrt(252)
+        df['target_vol'] = df['current_vol'].rolling(window=252*5, min_periods=252).median().fillna(0.15)
 
-    # --- 5. Hysteresis (Signal Smoothing) ---
-    # Prevents "flickering" quarantine signals. Requires 2 consecutive 
-    # months of 'Safety' to lift a Veto.
-    df['quarantine_signal'] = df['raw_signal'].rolling(window=2).max().fillna(0).astype(bool)
+        # 3. Proportional Scaling (The 'Dimmer Switch')
+        df['prop_weight'] = (df['target_vol'] / df['current_vol']).clip(0, 1.0)
 
-    # --- 6. Integrity & Audit ---
-    # Create a structural hash of the decision output for the Audit Ledger
-    output_cols = ['liq_z', 'garch_vol', 'quarantine_signal']
-    df_check = df[output_cols].tail(1).to_json()
-    engine_integrity = hashlib.sha256(df_check.encode()).hexdigest()
+        # 4. Bond Trap Detection (Systemic Liquidity Kill-Switch)
+        df['corr_spy_dxy'] = rets['SPY'].rolling(63).corr(rets['DXY'])
+        # Trap: Deep Dollar/Equity coupling + Elevated Volatility
+        df['trap_signal'] = (df['corr_spy_dxy'].abs() > 0.80) & (df['current_vol'] > df['target_vol'])
 
-    print(f"Engine Integrity Verified: {engine_integrity[:12]}")
-    print(f"Current State: {'QUARANTINE' if df['quarantine_signal'].iloc[-1] else 'CLEAR'}")
+        # 5. Final Decision Gate
+        df['final_weight'] = np.where(df['trap_signal'], 0.0, df['prop_weight'])
+        
+        return df[['final_weight', 'current_vol', 'target_vol', 'trap_signal']]
 
-    return df[output_cols]
+if __name__ == "__main__":
+    # Internal Audit Execution
+    controller = VetosProportionalController(api_key="8ceb380a1f418fffa80ce574495f43e9")
+    results = controller.run_engine("2005-01-01", "2026-02-11")
+    print(f"Current System State: {results['final_weight'].iloc[-1] * 100:.1f}% Exposure")
