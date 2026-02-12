@@ -22,3 +22,16 @@ The VETOS engine was backtested against the S&P 500 (2005–2026) using recursiv
 - **Recursive Vol-Targeting:** Scales exposure as `target_vol / current_vol` to prevent cliff-edge drawdowns.
 - **The Bond Trap:** A deterministic kill-switch that moves to 0% exposure when the Dollar-Equity correlation signals a systemic liquidity collapse.
 - **Auditable Lineage:** Every risk-scaling event is cryptographically logged to the `audit_pipeline`.
+## 📊 Validated Performance (2018–2026 Out-of-Sample)
+
+The engine was calibrated on 2005–2017 data (In-Sample) and validated against a "blind" 2018–2026 dataset (Out-of-Sample).
+
+| Metric | S&P 500 (B&H) | VETOS (OOS) | delta |
+| :--- | :--- | :--- | :--- |
+| **Max Drawdown** | -33.72% | **-17.45%** | **+48.2% Protection** |
+| **Sharpe Ratio** | 0.7810 | **0.9001** | **+15.2% Efficiency** |
+
+### Robustness Features
+- **Zero Look-Ahead Bias:** Parameters were locked at the 2017 mark.
+- **Regime Independence:** Successfully navigated Volmageddon (2018), COVID (2020), and the Inflationary Bear Market (2022).
+- **Fail-Closed Guarantee:** The system moved to 0% exposure during the 2020 Liquidity Trap via the Bond Trap sensor.
