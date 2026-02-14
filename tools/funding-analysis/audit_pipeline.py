@@ -1,9 +1,10 @@
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Any
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
+from scipy.stats import differential_entropy
 
-# Environment-agnostic Pydantic implementation (v1/v2 compatible)
+# Environment-agnostic Pydantic implementation
 try:
     from pydantic import model_validator as validator_v2
     PYDANTIC_V2, SERIALIZE = True, 'model_dump'
@@ -31,11 +32,29 @@ class BudgetItem(BaseModel):
                 raise ValueError("End date precedes start date.")
             return values
 
+def verify_signal_integrity(data_values: np.ndarray) -> bool:
+    """Phase 0: Entropy Veto. Returns False if data is 'too calm'."""
+    if len(data_values) < 5: return True  # Small samples don't trigger veto
+    noise = np.diff(data_values)
+    counts, _ = np.histogram(noise, bins=10, density=True)
+    # Scaled ratio against a 'normal' white noise baseline
+    ent_ratio = differential_entropy(counts + 1e-6) / 2.5
+    return ent_ratio > 0.40
+
 def run_financial_audit(input_data: List[Dict]) -> Dict[str, Any]:
     """
     Deterministic audit engine.
-    Implements fail-closed validation and robust outlier detection.
+    Integrated Entropy Veto -> Schema Enforcement -> Robust Outlier Detection.
     """
+    # Phase 0: Signal Integrity Check (Veto)
+    raw_allocations = np.array([r.get('budget_allocation', 0) for r in input_data])
+    if not verify_signal_integrity(raw_allocations):
+        return {
+            "status": "VETO",
+            "reason": "Information Complexity Failure (Entropy < 0.40)",
+            "records_processed": 0
+        }
+
     validated, rejected = [], []
 
     # Phase 1: Schema Enforcement
@@ -60,11 +79,9 @@ def run_financial_audit(input_data: List[Dict]) -> Dict[str, Any]:
     median = df['budget_allocation'].median()
     mad = np.median(np.abs(df['budget_allocation'] - median))
 
-    # Handle zero-variance distributions
     if mad == 0:
         df['modified_z'], df['is_outlier'] = 0.0, False
     else:
-        # Standard consistency constant for MAD (0.6745)
         df['modified_z'] = 0.6745 * (df['budget_allocation'] - median).abs() / mad
         df['is_outlier'] = df['modified_z'] > 3.5
 
