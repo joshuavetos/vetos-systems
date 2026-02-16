@@ -5,19 +5,19 @@
 ![Audit Status](https://img.shields.io/badge/Audit_Status-Continuous-success?style=flat-square)
 ![Stack](https://img.shields.io/badge/Tech_Stack-Python_%7C_Solidity_%7C_Z3-333333?style=flat-square)
 
-**A collection of structural engineering artifacts, autonomous systems architecture, and deterministic governance frameworks.**
+A collection of structural engineering artifacts, autonomous systems architecture, and deterministic governance frameworks.
 
 ---
 
-## Philosophy: Reliability Over Appearance
+## Reliability Philosophy
 
-This repository serves as a living record of technical competency. It documents how complex systems—from industrial automation to macro-financial engines—are audited, constrained, and forced into a safe state when certainty is insufficient.
+This repository is a working record of how high-consequence systems are designed to fail safely instead of failing silently.
 
-In high-consequence environments, failure is not just a bug; it is a structural risk. This portfolio is built on three non-negotiable invariants:
+In this context, three invariants are treated as non-negotiable:
 
-1. **Fail-Closed by Design:** Systems must move to a safe state (Halt) rather than degrading silently or hallucinating.
-2. **Auditable Lineage:** Every significant actuation or data transformation must emit a cryptographically verifiable receipt.
-3. **Epistemic Modesty:** If a system cannot prove its input is valid or its confidence is sufficient, it is forbidden from acting.
+1. **Fail-closed by default:** if confidence or validity checks fail, the system halts instead of acting.
+2. **Auditable lineage:** material transformations emit receipts that can be replayed or verified.
+3. **Epistemic modesty:** systems are expected to refuse action when uncertainty is unresolved.
 
 ```mermaid
 graph TD
@@ -27,39 +27,77 @@ graph TD
     C --> E[Emit Cryptographic Receipt]
     D --> E
     E --> F[Immutable Audit Ledger]
-
 ```
 
 ---
 
-## Featured Engineering Artifacts
+## Repository Layout
 
-### 1. Macro Regime Detection & Risk Monitoring
+### Core portfolio areas
 
-**Location:** `tools/structural-integrity-audit/macro_engine_v2.1.py`
-An institutional-grade risk engine that integrates macroeconomic indicators with advanced statistical modeling.
+- `work-samples/` — implementation-focused examples (governance stack, text-scalpel, locality experiments).
+- `tools/` — executable analysis and control utilities (funding analysis, structural integrity audit, geospatial discovery, coordination).
+- `ai-failure-gates/` — explicit fail-closed gate implementations and symbolic/coverage governors.
+- `audits/` — written audit frameworks, failure taxonomies, and case analyses.
+- `probes/` — targeted probes for API behavior, enterprise billing, context nonlinearity, and cost surfaces.
+- `artifacts/` — epistemic instrumentation and document-gate components.
+- `visualizations/` — concept maps and explanatory writeups.
 
-* **Conditional Volatility:** Implements GARCH(1,1) to identify variance clustering and structural regime shifts.
-* **Liquidity Monitoring:** Tracks "Net Liquidity" (Fed Assets - TGA - RRP) to identify systemic drawdowns with 2-4 week lead times.
-* **Quarantine Logic:** Automatically triggers a "Veto" on rebalancing when liquidity drains or volatility spikes above predicted surfaces.
+### Notable implementations
 
-### 2. Core Governance & Reliability Stack
-
-**Location:** `work-samples/core-governance-stack/`
-Concrete implementations of safety layers for autonomous and industrial systems.
-
-* **`guardrail_engine.py`**: Probabilistic refusal layer using Softmax confidence thresholds to block low-certainty AI inference.
-* **`audit_pipeline.py`**: SQLite-backed ledger providing immutable data lineage and cryptographic receipts for ETL processes.
-* **`concur_guard.py`**: Deterministic financial gating using hash-chained ledgers to prevent unauthorized or duplicate transactions.
-* **`industrial_guard.py`**: Deterministic state machine for predictive maintenance and safety enclosures in industrial OT (Operational Technology).
-* **`stress_cycle_v3.py`**: Full-cycle mechanism design testing for risk allocation kernels.
-
----
-
-## Operating Standard
-
-This is a working record of **Constraint Enforcement**. It documents the defensive architecture and reliability engineering required to make autonomous systems safe for real-world deployment in banking, energy, and industrial sectors.
+- `tools/structural-integrity-audit/macro_engine_v2.1.py`  
+  Macro regime and liquidity monitoring with volatility-aware veto triggers.
+- `work-samples/core-governance-stack/guardrail_engine.py`  
+  Confidence-gated refusal layer for low-certainty inference.
+- `work-samples/core-governance-stack/audit_pipeline.py`  
+  SQLite-backed audit lineage with cryptographic receipts.
+- `ai-failure-gates/fail_closed_gate/gate.py`  
+  Minimal fail-closed gate logic used for controlled rejection behavior.
+- `tools/funding-analysis/audit_pipeline.py`  
+  Deterministic funding record checks used by the make-based smoke test.
 
 ---
 
-**Maintained by Josh Vetos | 2026**
+## Quick Start
+
+### 1) Install dependencies
+
+```bash
+make install
+```
+
+### 2) Run repository smoke tests
+
+```bash
+make test
+```
+
+What `make test` currently does:
+
+- Compiles the repository (`python -m compileall -q .`).
+- Runs `work-samples/failure_oracle.py`.
+- Runs an inline import-and-execute check for `tools/funding-analysis/audit_pipeline.py`.
+
+### 3) Run the funding extraction utility
+
+```bash
+make run
+```
+
+---
+
+## Scope and Intent
+
+This repository is designed as an engineering portfolio, not a single deployable product. Most directories are independent prototypes, controls, or analyses that can be run on their own.
+
+If you are evaluating this codebase, start with:
+
+1. `work-samples/core-governance-stack/README.md`
+2. `tools/structural-integrity-audit/README.md`
+3. `ai-failure-gates/README.md`
+
+These provide the clearest picture of implementation quality, safety posture, and operational assumptions.
+
+---
+
+Maintained by Josh Vetos | 2026
