@@ -36,7 +36,7 @@ graph TD
 
 ### 1. Macro Regime Detection & Risk Monitoring
 
-**Location:** `tools/macro_engine_v2.py`
+**Location:** `tools/structural-integrity-audit/macro_engine_v2.1.py`
 An institutional-grade risk engine that integrates macroeconomic indicators with advanced statistical modeling.
 
 * **Conditional Volatility:** Implements GARCH(1,1) to identify variance clustering and structural regime shifts.

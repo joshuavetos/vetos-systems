@@ -1,6 +1,6 @@
 import hashlib
 import re
-from typing import Dict, Tuple, Optional, Protocol, Any
+from typing import Any, Dict
 from pydantic import BaseModel, Field
 
 # FAIL-CLOSED: Pydantic v2 is the ONLY supported version for deterministic serialization
@@ -28,7 +28,7 @@ class UncertaintyGatekeeper:
         """
         tokens = prompt.strip().split()
         if len(tokens) < 10 or len(prompt) < 50:
-            [span_11](start_span)raise ValueError("Rejection: Input density insufficient for audit.")[span_11](end_span)
+            raise ValueError("Rejection: Input density insufficient for audit.")
 
     def execute(self, prompt: str) -> str:
         """Deterministic execution with SHA-256 caching."""
@@ -42,7 +42,7 @@ class UncertaintyGatekeeper:
         raw = self.llm_client(prompt)
         res = LLMResponse(**raw)
         
-        # [span_12](start_span)Uncertainty terminates execution[span_12](end_span)
+        # Uncertainty terminates execution
         if re.search(r"\b(maybe|perhaps|probably|i think)\b", res.text, re.I):
             return "REFUSED: Probabilistic language detected"
 
@@ -50,5 +50,5 @@ class UncertaintyGatekeeper:
         return res.text
 
 # --------------------------------------------------
-# [span_13](start_span)Operational Rule: Refusal is success[span_13](end_span).
+# Operational Rule: Refusal is success.
 # --------------------------------------------------
