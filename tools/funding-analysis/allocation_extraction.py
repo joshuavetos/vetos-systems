@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 import json
 import hashlib
@@ -103,7 +105,7 @@ class FilingAuditor:
                     self.telemetry.update_stats(filing.identifier, filing.filing_type, 1)
                 else:
                     self.telemetry.log_rejection({"year": yr, "filing_id": filing.identifier, "filing_type": filing.filing_type, "context": "out_of_bounds"})
-            except (ValueError, int): continue
+            except (ValueError, TypeError): continue
 
         # 3. Currency Audit
         for info in currency_info:

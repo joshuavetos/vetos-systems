@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Any
 from pydantic import BaseModel, Field
-from scipy.stats import differential_entropy
 
 # Environment-agnostic Pydantic implementation
 try:
@@ -34,11 +33,23 @@ class BudgetItem(BaseModel):
 
 def verify_signal_integrity(data_values: np.ndarray) -> bool:
     """Phase 0: Entropy Veto. Returns False if data is 'too calm'."""
-    if len(data_values) < 5: return True  # Small samples don't trigger veto
+    if len(data_values) < 5:
+        return True  # Small samples don't trigger veto
+
     noise = np.diff(data_values)
-    counts, _ = np.histogram(noise, bins=10, density=True)
-    # Scaled ratio against a 'normal' white noise baseline
-    ent_ratio = differential_entropy(counts + 1e-6) / 2.5
+    counts, _ = np.histogram(noise, bins=10, density=False)
+    total = counts.sum()
+    if total == 0:
+        return False
+
+    probs = counts / total
+    probs = probs[probs > 0]
+    if probs.size == 0:
+        return False
+
+    entropy = -np.sum(probs * np.log(probs))
+    max_entropy = np.log(len(probs)) if len(probs) > 1 else 1.0
+    ent_ratio = entropy / max_entropy
     return ent_ratio > 0.40
 
 def run_financial_audit(input_data: List[Dict]) -> Dict[str, Any]:
