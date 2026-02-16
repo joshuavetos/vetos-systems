@@ -1,14 +1,26 @@
-import sys
-import os
+import importlib.util
 import json
 import hashlib
 from datetime import datetime
+from pathlib import Path
 
-# Path Hack to ensure we can import the engine from the tools directory
-# In production, this would be a proper package import.
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../tools/structural-integrity-audit')))
 
-from macro_engine_v2_1 import VetosProportionalController
+def _load_controller_class():
+    engine_path = (
+        Path(__file__).resolve().parents[2]
+        / "tools"
+        / "structural-integrity-audit"
+        / "macro_engine_v2.1.py"
+    )
+    spec = importlib.util.spec_from_file_location("macro_engine_v2_1", engine_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load macro engine module from {engine_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.VetosProportionalController
+
+
+VetosProportionalController = _load_controller_class()
 
 class AuditLedger:
     """
