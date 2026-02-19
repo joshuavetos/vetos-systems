@@ -1,3 +1,19 @@
+## Reproducibility
+
+This repository has been validated from clean-room Linux environments.
+
+Execution receipts from fresh runs are included under artifacts/execution-proofs/.
+
+See REPRODUCIBILITY.md for environment details and reproduction steps.
+
+## Verification Status
+
+- Clean-room tested on WSL Ubuntu
+- Modern Python packaging (PEP 668 compliant)
+- Deterministic pytest execution
+- Raw execution receipts included
+
+---
 # Vetos Systems — Deterministic Governance Prototypes
 
 ## What This Repository Demonstrates
