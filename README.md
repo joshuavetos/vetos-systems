@@ -10,6 +10,12 @@
 ## Reproducibility
 
 ```bash
+python verify.py
+```
+
+Secondary option:
+
+```bash
 make verify
 ```
 
