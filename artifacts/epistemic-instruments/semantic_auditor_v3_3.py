@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
-"""
-PURE SEMANTIC AUDITOR v3.3 (DETERMINISTIC)
-Optimized for Epistemic Integrity | No Theater | No Plots
-"""
+"""Semantic auditor with explicit failure semantics."""
 
 import argparse
-import sys
 
 import hdbscan
 import numpy as np
@@ -18,51 +14,26 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run semantic stability checks on real support ticket text."
     )
-    parser.add_argument(
-        "--input-csv",
-        required=True,
-        help="Path to a CSV file containing real support-ticket records.",
-    )
-    parser.add_argument(
-        "--text-column",
-        default="text",
-        help="Name of the CSV column containing ticket text (default: text).",
-    )
+    parser.add_argument("--input-csv", required=True)
+    parser.add_argument("--text-column", default="text")
     return parser.parse_args()
 
 
 def validate_environment() -> None:
-    try:
-        assert pd.__version__ >= "2.2"
-        print("✅ Environment validated")
-    except (AssertionError, ImportError):
-        print(
-            "❌ Environment failure: pandas>=2.2, sentence-transformers, umap-learn, hdbscan required"
-        )
-        sys.exit(1)
+    if pd.__version__ < "2.2":
+        raise RuntimeError("pandas>=2.2 required")
 
 
 def load_input(path: str, text_column: str) -> pd.DataFrame:
-    try:
-        df = pd.read_csv(path)
-    except Exception as exc:
-        print(f"❌ Unable to read input CSV: {exc}")
-        sys.exit(1)
-
+    df = pd.read_csv(path)
     if text_column not in df.columns:
-        print(
-            f"❌ Missing required text column '{text_column}'. Available columns: {list(df.columns)}"
-        )
-        sys.exit(1)
+        raise ValueError(f"missing required text column '{text_column}'")
 
     text_series = df[text_column].dropna().astype(str).str.strip()
     text_series = text_series[text_series != ""]
-
     if text_series.empty:
-        print("❌ Input data contains no usable text rows")
-        sys.exit(1)
+        raise ValueError("input data contains no usable text rows")
 
-    print(f"✅ Loaded {len(text_series)} records from {path}")
     return pd.DataFrame({"text": text_series})
 
 
@@ -81,22 +52,19 @@ def main() -> None:
 
     df["cluster"] = labels
     clusters = df[df["cluster"] != -1].groupby("cluster").agg(
-        {
-            "text": ["count", lambda x: " | ".join(x.str.lower().str[:50].tolist()[:3])],
-        }
+        {"text": ["count", lambda x: " | ".join(x.str.lower().str[:50].tolist()[:3])]}
     )
     clusters.columns = ["Count", "SampleText"]
     clusters["Share"] = (clusters["Count"] / clusters["Count"].sum() * 100).round(1)
 
-    print("\n--- PRODUCTION SUMMARY ---")
     if clusters.empty:
-        print("No non-noise clusters found.")
+        print("DECISION: INSUFFICIENT_STRUCTURE")
     else:
         print(clusters[["Share", "SampleText"]].to_markdown())
 
     noise_ratio = np.sum(labels == -1) / len(labels)
-    status = "✅ PRODUCTION READY" if noise_ratio < 0.3 else "❌ UNSTABLE (HIGH NOISE)"
-    print(f"\n🎯 DECISION: {status} | Noise: {noise_ratio:.1%}")
+    decision = "REVIEWABLE" if noise_ratio < 0.3 else "UNSTABLE_HIGH_NOISE"
+    print(f"DECISION: {decision} | noise_ratio={noise_ratio:.1%}")
 
 
 if __name__ == "__main__":
