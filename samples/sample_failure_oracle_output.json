@@ -1,0 +1,17 @@
+{
+  "artifact": "work-samples/failure_oracle.c",
+  "checks": [
+    {
+      "check": "artifact_hash",
+      "sha256": "8b77022a5bd328d4b0ff2a44d518d915c1665b344deee8c016f9cf5bdebadf21",
+      "status": "PASS"
+    },
+    {
+      "check": "availability_test",
+      "reason": "Docker availability test skipped by configuration",
+      "status": "SKIP"
+    }
+  ],
+  "seed": 2026,
+  "status": "PASS"
+}

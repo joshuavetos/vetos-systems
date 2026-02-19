@@ -1,70 +1,87 @@
 #!/usr/bin/env python3
-"""Semantic auditor with explicit failure semantics."""
+"""Deterministic semantic auditor with explicit failure semantics."""
+
+from __future__ import annotations
 
 import argparse
+import json
+from pathlib import Path
 
-import hdbscan
 import numpy as np
 import pandas as pd
-from sentence_transformers import SentenceTransformer
-import umap
+
+
+class SemanticAuditError(RuntimeError):
+    """Raised when semantic auditing cannot continue deterministically."""
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run semantic stability checks on real support ticket text."
-    )
+    parser = argparse.ArgumentParser(description="Run deterministic semantic stability checks.")
     parser.add_argument("--input-csv", required=True)
     parser.add_argument("--text-column", default="text")
+    parser.add_argument("--output-json", default="")
     return parser.parse_args()
 
 
-def validate_environment() -> None:
-    if pd.__version__ < "2.2":
-        raise RuntimeError("pandas>=2.2 required")
-
-
 def load_input(path: str, text_column: str) -> pd.DataFrame:
-    df = pd.read_csv(path)
+    csv_path = Path(path)
+    if not csv_path.exists():
+        raise SemanticAuditError(f"input CSV does not exist: {path}")
+
+    df = pd.read_csv(csv_path)
     if text_column not in df.columns:
-        raise ValueError(f"missing required text column '{text_column}'")
+        raise SemanticAuditError(f"missing required text column '{text_column}'")
 
     text_series = df[text_column].dropna().astype(str).str.strip()
     text_series = text_series[text_series != ""]
     if text_series.empty:
-        raise ValueError("input data contains no usable text rows")
+        raise SemanticAuditError("input data contains no usable text rows")
 
     return pd.DataFrame({"text": text_series})
 
 
+def lexical_cluster(tokens: list[str]) -> str:
+    token_set = set(tokens)
+    if token_set & {"error", "fail", "crash", "timeout", "bug"}:
+        return "incident"
+    if token_set & {"refund", "invoice", "charge", "billing", "payment"}:
+        return "billing"
+    if token_set & {"login", "password", "access", "auth", "signin"}:
+        return "access"
+    return "general"
+
+
+def run_audit(df: pd.DataFrame) -> dict:
+    labels: list[str] = []
+    for text in df["text"]:
+        normalized = "".join(ch.lower() if ch.isalnum() else " " for ch in text)
+        tokens = [tok for tok in normalized.split() if tok]
+        labels.append(lexical_cluster(tokens))
+
+    out = df.copy()
+    out["cluster"] = labels
+    counts = out.groupby("cluster").size().sort_values(ascending=False)
+    noise_ratio = float((counts.get("general", 0) / len(out)))
+    decision = "REVIEWABLE" if noise_ratio < 0.6 else "UNSTABLE_HIGH_NOISE"
+
+    return {
+        "rows": int(len(out)),
+        "clusters": {name: int(value) for name, value in counts.items()},
+        "noise_ratio": round(noise_ratio, 4),
+        "decision": decision,
+    }
+
+
 def main() -> None:
     args = parse_args()
-    validate_environment()
     df = load_input(args.input_csv, args.text_column)
+    result = run_audit(df)
+    rendered = json.dumps(result, indent=2, sort_keys=True)
 
-    model = SentenceTransformer("all-MiniLM-L6-v2")
-    embeddings = model.encode(df["text"].tolist(), show_progress_bar=False)
+    if args.output_json:
+        Path(args.output_json).write_text(rendered + "\n", encoding="utf-8")
 
-    reducer = umap.UMAP(n_neighbors=15, n_components=2, metric="cosine", random_state=42)
-    embed_2d = reducer.fit_transform(embeddings)
-    clusterer = hdbscan.HDBSCAN(min_cluster_size=5, min_samples=3)
-    labels = clusterer.fit_predict(embed_2d)
-
-    df["cluster"] = labels
-    clusters = df[df["cluster"] != -1].groupby("cluster").agg(
-        {"text": ["count", lambda x: " | ".join(x.str.lower().str[:50].tolist()[:3])]}
-    )
-    clusters.columns = ["Count", "SampleText"]
-    clusters["Share"] = (clusters["Count"] / clusters["Count"].sum() * 100).round(1)
-
-    if clusters.empty:
-        print("DECISION: INSUFFICIENT_STRUCTURE")
-    else:
-        print(clusters[["Share", "SampleText"]].to_markdown())
-
-    noise_ratio = np.sum(labels == -1) / len(labels)
-    decision = "REVIEWABLE" if noise_ratio < 0.3 else "UNSTABLE_HIGH_NOISE"
-    print(f"DECISION: {decision} | noise_ratio={noise_ratio:.1%}")
+    print(rendered)
 
 
 if __name__ == "__main__":

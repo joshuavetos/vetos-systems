@@ -1,0 +1,7 @@
+[
+  {"project_name": "Bridge Retrofit", "budget_allocation": 1200.0, "fiscal_start": 2026, "fiscal_end": 2027},
+  {"project_name": "Transit Signals", "budget_allocation": 1245.0, "fiscal_start": 2026, "fiscal_end": 2028},
+  {"project_name": "Water Mains", "budget_allocation": 1210.0, "fiscal_start": 2026, "fiscal_end": 2028},
+  {"project_name": "School HVAC", "budget_allocation": 1260.0, "fiscal_start": 2026, "fiscal_end": 2027},
+  {"project_name": "Street Lighting", "budget_allocation": 1225.0, "fiscal_start": 2026, "fiscal_end": 2028}
+]
