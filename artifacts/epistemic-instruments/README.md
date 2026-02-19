@@ -20,7 +20,7 @@ Determines whether semantic clusters in support-ticket text are stable enough
 to justify human inspection.
 
 What it does:
-- Validates input data
+- Validates input data and rejects missing/empty sources
 - Tests embedding consistency
 - Performs unsupervised clustering
 - Stress-tests cluster stability (noise, parameters, order)
@@ -34,6 +34,14 @@ What it explicitly does NOT do:
 - Does not fabricate data
 
 If stability conditions are not met, the tool abstains.
+
+Usage:
+```bash
+python artifacts/epistemic-instruments/semantic_auditor_v3_3.py --input-csv /path/to/real_tickets.csv --text-column text
+```
+
+The auditor refuses to run without an explicit CSV source and does not generate fallback ticket data.
+
 
 ---
 
