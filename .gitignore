@@ -3,3 +3,6 @@ __pycache__/
 *.db
 *.log
 .ipynb_checkpoints/
+.venv/
+pycache/
+*.pyc
