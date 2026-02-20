@@ -37,7 +37,7 @@ def _docker_available() -> bool:
         return False
 
 
-def run_oracle(artifact_path: str, seed: int, skip_docker: bool) -> dict:
+def run_oracle(artifact_path: str | Path, seed: int, skip_docker: bool) -> dict:
     artifact = Path(artifact_path)
     if not artifact.exists():
         raise FileNotFoundError(f"artifact does not exist: {artifact_path}")
@@ -68,7 +68,7 @@ def run_oracle(artifact_path: str, seed: int, skip_docker: bool) -> dict:
 
     status = "PASS" if all(check["status"] in {"PASS", "SKIP"} for check in checks) else "FAIL"
     return {
-        "artifact": artifact_path,
+        "artifact": str(artifact),
         "seed": seed,
         "status": status,
         "checks": checks,

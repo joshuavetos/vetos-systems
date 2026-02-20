@@ -15,3 +15,8 @@ def test_failure_oracle_matches_committed_output():
     expected = json.loads((REPO_ROOT / "samples" / "sample_failure_oracle_output.json").read_text(encoding="utf-8"))
     actual = module.run_oracle("work-samples/failure_oracle.c", seed=2026, skip_docker=True)
     assert actual == expected
+
+
+def test_failure_oracle_accepts_path_like_artifact_path():
+    actual = module.run_oracle(REPO_ROOT / "work-samples" / "failure_oracle.c", seed=2026, skip_docker=True)
+    assert actual["artifact"] == str(REPO_ROOT / "work-samples" / "failure_oracle.c")
