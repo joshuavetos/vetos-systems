@@ -7,6 +7,14 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 from datetime import date
 
+
+@dataclass(frozen=True)
+class Filing:
+    identifier: str
+    filing_type: str
+    accepted_date: date
+    processed_text: str
+
 # --- 1. Hardened Telemetry ---
 class Telemetry:
     def __init__(self):
@@ -59,6 +67,13 @@ class FilingAuditor:
             return year_val
         raise ValueError(f"Ambiguous: {token}")
 
+    def _normalize_reference_date(self, accepted_date: date | str) -> date:
+        if isinstance(accepted_date, date):
+            return accepted_date
+        if isinstance(accepted_date, str):
+            return date.fromisoformat(accepted_date)
+        raise TypeError("accepted_date must be a date or ISO-8601 string")
+
     def _extract_currency(self, text: str) -> List[Dict]:
         multipliers = {'m': 1e6, 'million': 1e6, 'b': 1e9, 'billion': 1e9}
         # Hardened pattern with forced boundary for shorthand units
@@ -87,11 +102,13 @@ class FilingAuditor:
         if not text: return
         is_outlook = any(kw in text.lower() for kw in ['outlook', 'forecast', 'projection', 'planned'])
         max_yr_limit = 2200 if is_outlook else 2100
+        reference_date = self._normalize_reference_date(filing.accepted_date)
         
         # 1. Scale Learning
         currency_info = self._extract_currency(text)
         abs_amounts = [abs(i['amount']) for i in currency_info if abs(i['amount']) > 0]
-        dynamic_cap = (sorted(abs_amounts[:5])[len(abs_amounts[:5])//2] * 10.0) if abs_amounts else 1e12
+        baseline = sorted(abs_amounts)[:5]
+        dynamic_cap = (baseline[len(baseline) // 2] * 10.0) if baseline else 1e12
 
         # 2. Year Extraction
         pattern = r"(?i)\b(?:year|period|fy)\s*(?P<val>\d{2,4}(?:[-/]\d{2,4})?)\b"
@@ -99,7 +116,7 @@ class FilingAuditor:
             token = match.group('val')
             root_part = re.split(r'[-/]', token)[0]
             try:
-                yr = self._resolve_year_token(root_part, filing.accepted_date)
+                yr = self._resolve_year_token(root_part, reference_date)
                 if 1900 <= yr <= max_yr_limit:
                     if yr in self.coverage: self.coverage[yr] = 1
                     self.telemetry.update_stats(filing.identifier, filing.filing_type, 1)

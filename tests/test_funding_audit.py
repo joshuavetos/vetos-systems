@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,8 +10,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO_ROOT / "tools" / "funding-analysis" / "audit_pipeline.py"
 spec = importlib.util.spec_from_file_location("funding_audit", MODULE_PATH)
 module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
 assert spec.loader is not None
 spec.loader.exec_module(module)
+
+EXTRACTION_MODULE_PATH = REPO_ROOT / "tools" / "funding-analysis" / "allocation_extraction.py"
+extraction_spec = importlib.util.spec_from_file_location("allocation_extraction", EXTRACTION_MODULE_PATH)
+extraction_module = importlib.util.module_from_spec(extraction_spec)
+sys.modules[extraction_spec.name] = extraction_module
+assert extraction_spec.loader is not None
+extraction_spec.loader.exec_module(extraction_module)
 
 
 def test_run_financial_audit_rejects_invalid_record():
@@ -46,3 +55,43 @@ def test_integration_sample_payload_is_auditable():
     assert result["status"] == "COMPLETE"
     assert result["records_validated"] == 5
     assert result["records_rejected"] == 0
+
+
+def test_filing_auditor_accepts_iso_date_string():
+    auditor = extraction_module.FilingAuditor(target_years=[2024])
+    filing = extraction_module.Filing(
+        identifier="f-1",
+        filing_type="10-K",
+        accepted_date="2024-01-15",
+        processed_text="For fiscal year 2024 revenue was $100.",
+    )
+
+    auditor.audit_filing(filing)
+
+    assert auditor.coverage[2024] == 1
+
+
+def test_filing_auditor_rejects_outlier_not_in_first_five_mentions():
+    auditor = extraction_module.FilingAuditor(target_years=[2024])
+    filing = extraction_module.Filing(
+        identifier="f-2",
+        filing_type="10-K",
+        accepted_date="2024-01-15",
+        processed_text="\n".join(
+            [
+                "$100",
+                "$101",
+                "$102",
+                "$103",
+                "$104",
+                "$1,000,000",
+            ]
+        ),
+    )
+
+    auditor.audit_filing(filing)
+
+    assert any(
+        rejection["context"] == "financial_outlier" and rejection["value"] == 1000000.0
+        for rejection in auditor.telemetry.rejections
+    )
