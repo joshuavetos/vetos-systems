@@ -77,7 +77,7 @@ class FilingAuditor:
     def _extract_currency(self, text: str) -> List[Dict]:
         multipliers = {'m': 1e6, 'million': 1e6, 'b': 1e9, 'billion': 1e9}
         # Hardened pattern with forced boundary for shorthand units
-        pattern = r"(?i)(?<![\w.])(?P<sign>-?)\$((?P<value>\d{1,3}(?:,\d{3})*(?:\.\d{2})?)(?:\s+(?P<unit>million|billion|m|b))?)(?![\d])"
+        pattern = r"(?i)(?<![\w.])(?P<sign>-?)\$((?P<value>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?)(?:\s*(?P<unit>million|billion|m|b))?)(?![\d])"
         results = []
         for match in re.finditer(pattern, text):
             g = match.groupdict()

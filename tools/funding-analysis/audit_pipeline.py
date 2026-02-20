@@ -51,10 +51,6 @@ def run_financial_audit(input_data: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not input_data:
         raise ValueError("input_data must not be empty")
 
-    raw_allocations = np.array([r.get("budget_allocation", 0) for r in input_data], dtype=float)
-    if not verify_signal_integrity(raw_allocations):
-        raise RuntimeError("Entropy veto triggered: Information Complexity Failure (Entropy < 0.40)")
-
     validated = []
     for index, record in enumerate(input_data):
         try:
@@ -62,6 +58,10 @@ def run_financial_audit(input_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         except Exception as exc:
             raise ValueError(f"record at index {index} failed validation") from exc
         validated.append(item.model_dump())
+
+    raw_allocations = np.array([record["budget_allocation"] for record in validated], dtype=float)
+    if not verify_signal_integrity(raw_allocations):
+        raise RuntimeError("Entropy veto triggered: Information Complexity Failure (Entropy < 0.40)")
 
     df = pd.DataFrame(validated)
     median = df["budget_allocation"].median()

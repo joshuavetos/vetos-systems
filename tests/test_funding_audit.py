@@ -95,3 +95,32 @@ def test_filing_auditor_rejects_outlier_not_in_first_five_mentions():
         rejection["context"] == "financial_outlier" and rejection["value"] == 1000000.0
         for rejection in auditor.telemetry.rejections
     )
+
+
+def test_run_financial_audit_prioritizes_schema_validation_before_entropy_gate():
+    payload = [
+        {"project_name": "A", "budget_allocation": 1000.0, "fiscal_start": 2025, "fiscal_end": 2026},
+        {"project_name": "B", "budget_allocation": 1000.0, "fiscal_start": 2025, "fiscal_end": 2026},
+        {"project_name": "C", "budget_allocation": 1000.0, "fiscal_start": 2025, "fiscal_end": 2027},
+        {"project_name": "D", "budget_allocation": 1000.0, "fiscal_start": 2025, "fiscal_end": 2027},
+        {"project_name": "", "budget_allocation": 1000.0, "fiscal_start": 2025, "fiscal_end": 2027},
+    ]
+
+    with pytest.raises(ValueError, match="record at index 4 failed validation"):
+        module.run_financial_audit(payload)
+
+
+def test_filing_auditor_extracts_unformatted_and_shorthand_currency():
+    auditor = extraction_module.FilingAuditor(target_years=[2024])
+    filing = extraction_module.Filing(
+        identifier="f-3",
+        filing_type="10-Q",
+        accepted_date="2024-05-01",
+        processed_text="Budget for year 2024 includes $1000 and reserve of $2m.",
+    )
+
+    auditor.audit_filing(filing)
+
+    outlier_values = {rejection["value"] for rejection in auditor.telemetry.rejections if rejection["context"] == "financial_outlier"}
+    assert 1000.0 not in outlier_values
+    assert 2000000.0 not in outlier_values
