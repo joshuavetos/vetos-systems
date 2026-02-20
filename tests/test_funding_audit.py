@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -163,3 +164,31 @@ def test_filing_auditor_extracts_single_decimal_currency():
 
     outlier_values = {rejection["value"] for rejection in auditor.telemetry.rejections if rejection["context"] == "financial_outlier"}
     assert 100.5 not in outlier_values
+
+
+def test_filing_auditor_accepts_lowercase_z_datetime_string():
+    auditor = extraction_module.FilingAuditor(target_years=[2024])
+    filing = extraction_module.Filing(
+        identifier="f-6",
+        filing_type="10-K",
+        accepted_date="2024-01-15T10:15:30z",
+        processed_text="For fiscal year 2024 revenue was $100.",
+    )
+
+    auditor.audit_filing(filing)
+
+    assert auditor.coverage[2024] == 1
+
+
+def test_filing_auditor_accepts_datetime_instance_reference_date():
+    auditor = extraction_module.FilingAuditor(target_years=[2024])
+    filing = extraction_module.Filing(
+        identifier="f-7",
+        filing_type="10-K",
+        accepted_date=datetime(2024, 1, 15, 10, 15, 30),
+        processed_text="For fiscal year 2024 revenue was $100.",
+    )
+
+    auditor.audit_filing(filing)
+
+    assert auditor.coverage[2024] == 1

@@ -68,10 +68,12 @@ class FilingAuditor:
         raise ValueError(f"Ambiguous: {token}")
 
     def _normalize_reference_date(self, accepted_date: date | str) -> date:
+        if isinstance(accepted_date, datetime):
+            return accepted_date.date()
         if isinstance(accepted_date, date):
             return accepted_date
         if isinstance(accepted_date, str):
-            normalized = accepted_date.strip().replace("Z", "+00:00")
+            normalized = re.sub(r"[zZ]$", "+00:00", accepted_date.strip())
             try:
                 return date.fromisoformat(normalized)
             except ValueError:
