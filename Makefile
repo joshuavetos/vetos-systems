@@ -1,8 +1,8 @@
 install:
 	pip install -r requirements.txt
 
-verify:
-	python verify.py
+test:
+	pytest -q
 
 run:
 	python tools/funding-analysis/allocation_extraction.py

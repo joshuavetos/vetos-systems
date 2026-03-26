@@ -1,9 +1,9 @@
 {
-  "artifact": "work-samples/failure_oracle.c",
+  "artifact": "work-samples/failure_oracle.py",
   "checks": [
     {
       "check": "artifact_hash",
-      "sha256": "8b77022a5bd328d4b0ff2a44d518d915c1665b344deee8c016f9cf5bdebadf21",
+      "sha256": "ee90371536987a361e249daad4645cc2b6b173b0dad32b5c57f590e2ed6e7a40",
       "status": "PASS"
     },
     {
