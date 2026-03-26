@@ -26,13 +26,13 @@ See REPRODUCIBILITY.md for environment details and reproduction steps.
 ## Reproducibility
 
 ```bash
-python verify.py
+pytest -q
 ```
 
 Secondary option:
 
 ```bash
-make verify
+make test
 ```
 
 ## Failure Surfaces Covered

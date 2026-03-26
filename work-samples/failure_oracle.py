@@ -1,4 +1,7 @@
-"""Failure Oracle integrity checks with deterministic execution."""
+"""Failure Oracle integrity checks with deterministic execution.
+
+The oracle validates any committed artifact path and records its hash.
+"""
 
 from __future__ import annotations
 
