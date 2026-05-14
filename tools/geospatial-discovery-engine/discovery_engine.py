@@ -10,12 +10,11 @@ Tier 2: Temporal stability validation (SLC coherence)
 Tier 3: Morphology & topology validation
 """
 
-import ee
-import numpy as np
+import importlib
+import importlib.util
 import json
-from skimage.morphology import skeletonize
-from skimage.measure import label, regionprops
-from scipy.ndimage import gaussian_filter
+
+import numpy as np
 
 # ---------------------------------------------------------------------
 # CONFIGURATION (Peer-review explicit)
@@ -34,18 +33,55 @@ MIN_PIXEL_SPAN = 15  # 150m @ 10m resolution
 # INITIALIZATION
 # ---------------------------------------------------------------------
 
+def _require_module(module_name):
+    root_module = module_name.split(".", 1)[0]
+    if importlib.util.find_spec(root_module) is None:
+        raise ImportError(
+            f"{module_name} is required for this geospatial operation but is not installed"
+        )
+    if importlib.util.find_spec(module_name) is None:
+        raise ImportError(
+            f"{module_name} is required for this geospatial operation but is not installed"
+        )
+    return importlib.import_module(module_name)
+
+
+def _require_earth_engine():
+    return _require_module("ee")
+
+
+def _require_skimage_tools():
+    morphology = _require_module("skimage.morphology")
+    measure = _require_module("skimage.measure")
+    return morphology.skeletonize, measure.label, measure.regionprops
+
+
 def initialize_ee():
+    ee = _require_earth_engine()
     try:
         ee.Initialize(project=PROJECT_ID)
     except Exception:
         ee.Authenticate()
         ee.Initialize(project=PROJECT_ID)
+    return ee
 
 # ---------------------------------------------------------------------
 # TIER 1: LOCALIZED Z-SCORE (GRD)
 # ---------------------------------------------------------------------
 
+
+def build_gate_result(name, verdict, lat, lon, **metrics):
+    result = {
+        "name": name,
+        "coordinates": {"lat": float(lat), "lon": float(lon)},
+        "verdict": verdict,
+    }
+    result.update(metrics)
+    return result
+
+
 def compute_local_z(image, point, buffer_dist=500):
+    ee = _require_earth_engine()
     ambient = point.buffer(buffer_dist).difference(point.buffer(100))
     stats = image.reduceRegion(
         reducer=ee.Reducer.mean().combine(
@@ -63,36 +99,91 @@ def compute_local_z(image, point, buffer_dist=500):
 # TIER 2: TEMPORAL STABILITY (SLC COHERENCE)
 # ---------------------------------------------------------------------
 
+def validate_mean_coherence(mean_coherence):
+    if mean_coherence is None:
+        return False
+
+    try:
+        value = float(mean_coherence)
+    except (TypeError, ValueError):
+        return False
+
+    if not np.isfinite(value):
+        return False
+
+    return value >= COHERENCE_FLOOR
+
+
 def compute_mean_coherence(point, orbit):
-    slc = (
-        ee.ImageCollection("COPERNICUS/S1_SLC")
-        .filterBounds(point)
-        .filter(ee.Filter.eq("relativeOrbitNumber_start", orbit))
-        .sort("system:time_start")
+    raise NotImplementedError(
+        "Mean coherence requires a completed InSAR coherence product; "
+        "pass its numeric mean to run_discovery(mean_coherence=...)."
     )
-    return slc  # placeholder for InSAR pipeline integration
 
 # ---------------------------------------------------------------------
 # TIER 3: MORPHOLOGY GATE
 # ---------------------------------------------------------------------
 
 def box_count_fractal_dimension(binary):
-    sizes = [2, 4, 8, 16]
+    binary = np.asarray(binary, dtype=bool)
+    min_side = min(binary.shape)
+    sizes = [size for size in (2, 4, 8, 16) if size <= min_side]
+
     counts = []
+    valid_sizes = []
     for size in sizes:
-        reduced = binary.reshape(
-            (binary.shape[0] // size, size,
-             binary.shape[1] // size, size)
+        rows = binary.shape[0] - (binary.shape[0] % size)
+        cols = binary.shape[1] - (binary.shape[1] % size)
+        if rows == 0 or cols == 0:
+            continue
+
+        cropped = binary[:rows, :cols]
+        reduced = cropped.reshape(
+            (rows // size, size, cols // size, size)
         ).max(axis=(1, 3))
-        counts.append(np.sum(reduced > 0))
-    coeffs = np.polyfit(np.log(sizes), np.log(counts), 1)
-    return -coeffs[0]
+        count = int(np.sum(reduced > 0))
+        if count > 0:
+            valid_sizes.append(size)
+            counts.append(count)
+
+    if len(counts) < 2:
+        return 0.0
+
+    coeffs = np.polyfit(np.log(valid_sizes), np.log(counts), 1)
+    return float(-coeffs[0])
+
 
 def compute_entropy(angles):
-    hist, _ = np.histogram(angles, bins=18, range=(0, 180), density=True)
-    return -np.sum(hist * np.log(hist + 1e-9))
+    angles = np.asarray(angles, dtype=float)
+    if angles.size == 0:
+        return 0.0
+
+    hist, _ = np.histogram(angles % 180, bins=18, range=(0, 180), density=False)
+    total = hist.sum()
+    if total == 0:
+        return 0.0
+
+    probabilities = hist[hist > 0] / total
+    return float(-np.sum(probabilities * np.log(probabilities)))
+
+
+def skeleton_orientations(skeleton):
+    points = np.argwhere(skeleton)
+    if len(points) < 2:
+        return np.array([], dtype=float)
+
+    orientations = []
+    point_set = {tuple(point) for point in points}
+    for row, col in points:
+        for d_row, d_col in ((0, 1), (1, 0), (1, 1), (1, -1)):
+            if (row + d_row, col + d_col) in point_set:
+                orientations.append(np.degrees(np.arctan2(d_row, d_col)) % 180)
+
+    return np.array(orientations, dtype=float)
+
 
 def analyze_structure(data):
+    skeletonize, label, regionprops = _require_skimage_tools()
     binary = (data > np.percentile(data, 95)).astype(np.uint8)
     skeleton = skeletonize(binary > 0)
 
@@ -109,7 +200,7 @@ def analyze_structure(data):
 
     eccentricity = largest.eccentricity
     fractal_dim = box_count_fractal_dimension(binary)
-    entropy = compute_entropy(np.random.uniform(0, 180, 100))  # placeholder
+    entropy = compute_entropy(skeleton_orientations(skeleton))
 
     return {
         "length_pixels": largest.area,
@@ -122,8 +213,8 @@ def analyze_structure(data):
 # ENGINE ENTRYPOINT
 # ---------------------------------------------------------------------
 
-def run_discovery(name, lat, lon):
-    initialize_ee()
+def run_discovery(name, lat, lon, mean_coherence=None):
+    ee = initialize_ee()
 
     point = ee.Geometry.Point([lon, lat])
     buffer = point.buffer(500).bounds()
@@ -145,33 +236,39 @@ def run_discovery(name, lat, lon):
     z_max = float(np.max(data))
 
     if z_max < Z_THRESHOLD:
-        return {"name": name, "verdict": "FAIL_STATISTICAL"}
+        return build_gate_result(name, "FAIL_STATISTICAL", lat, lon, z_max=z_max)
+
+    if not validate_mean_coherence(mean_coherence):
+        return build_gate_result(name, "FAIL_COHERENCE", lat, lon, z_max=z_max)
 
     structure = analyze_structure(data)
 
     if structure is None:
-        return {"name": name, "verdict": "FAIL_RESOLUTION"}
+        return build_gate_result(name, "FAIL_RESOLUTION", lat, lon)
 
     if structure["eccentricity"] > 0.92:
-        return {"name": name, "verdict": "FAIL_LINEARITY"}
+        return build_gate_result(name, "FAIL_LINEARITY", lat, lon, **structure)
 
     if structure["fractal_dimension"] > FRACTAL_THRESHOLD:
-        return {"name": name, "verdict": "FAIL_FRACTAL"}
+        return build_gate_result(name, "FAIL_FRACTAL", lat, lon, **structure)
 
     if structure["entropy"] > ENTROPY_THRESHOLD:
-        return {"name": name, "verdict": "FAIL_ENTROPY"}
+        return build_gate_result(name, "FAIL_ENTROPY", lat, lon, **structure)
 
-    return {
-        "name": name,
-        "verdict": "STRUCTURAL_CANDIDATE",
-        "z_max": z_max,
+    return build_gate_result(
+        name,
+        "STRUCTURAL_CANDIDATE",
+        lat,
+        lon,
+        z_max=z_max,
+        mean_coherence=float(mean_coherence),
         **structure,
-    }
+    )
 
 # ---------------------------------------------------------------------
 # JSON PACKAGE OUTPUT
 # ---------------------------------------------------------------------
 
 def export_candidate_package(result, filepath):
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2)
