@@ -2,8 +2,10 @@ import copy
 import hashlib
 import json
 import math
+import os
 import string
 from collections import Counter
+from contextlib import contextmanager
 from enum import Enum
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, cast
@@ -19,6 +21,17 @@ MAX_GOVERNANCE_PAYLOAD_BYTES = 1_000_000
 MAX_GOVERNANCE_DEPTH = 20
 MAX_LEDGER_BYTES = 10_000_000
 MAX_AUDIT_BYTES = 2_000_000
+MAX_GOVERNANCE_OBJECTS = 10_000
+MAX_GOVERNANCE_STRING_BYTES = 16_384
+MAX_GOVERNANCE_CONTAINER_ITEMS = 2_000
+MAX_UNSAFE_TOTAL = 12.0
+MAX_QUERY_BYTES = 16_384
+AUDIT_EVENT_BYTES = 4_096
+FORBIDDEN_AUDIT_KEYS = {"payload", "query", "context", "raw_query", "prompt", "input"}
+AUDIT_FIELD_ALLOWLIST = {
+    "policy_denial": {"category", "code", "decision", "input_hash", "receipt_id"},
+    "runtime_failure": {"category", "code", "detail"},
+}
 
 
 class GovernanceErrorPayload(BaseModel):
@@ -97,16 +110,23 @@ class InputSchema(BaseModel):
             raise ValueError(f"Domain '{v}' not in whitelist: {DOMAIN_WHITELIST}")
         return v
 
+    @field_validator("query", "context")
+    @classmethod
+    def text_fields_are_bounded(cls, v: str) -> str:
+        if len(v.encode("utf-8")) > MAX_QUERY_BYTES:
+            raise ValueError("text field byte ceiling exceeded")
+        return v
+
     @field_validator("timestamp")
     @classmethod
     def timestamp_must_be_finite(cls, v: float) -> float:
         if not math.isfinite(v):
             raise ValueError("timestamp must be finite")
-        return v
+        return _normalize_float(v, 6)
 
 
 class DecisionReceipt(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     sequence: int
     receipt_id: str
@@ -117,6 +137,16 @@ class DecisionReceipt(BaseModel):
     timestamp: float
     reasoning: LexicalReasoning
 
+    @field_validator("confidence_score")
+    @classmethod
+    def confidence_must_be_quantized(cls, v: float) -> float:
+        return _normalize_float(v, 8)
+
+    @field_validator("timestamp")
+    @classmethod
+    def receipt_timestamp_must_be_quantized(cls, v: float) -> float:
+        return _normalize_float(v, 6)
+
 
 class ReplayValidationResult(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -125,6 +155,7 @@ class ReplayValidationResult(BaseModel):
     last_hash: str
     next_sequence: int
     receipts: list[DecisionReceipt]
+    ledger_size: int = 0
 
 
 class LexicalFeatures(NamedTuple):
@@ -154,6 +185,12 @@ def _canonical_hash(data: Any) -> str:
     return _sha256_text(_canonical_json(data))
 
 
+def _normalize_float(value: float, places: int) -> float:
+    if not math.isfinite(value):
+        raise SerializationError("non-finite float rejected", code="NON_FINITE_FLOAT")
+    return round(float(value), places)
+
+
 def _max_depth(value: Any, depth: int = 0, seen: set[int] | None = None) -> int:
     if seen is None:
         seen = set()
@@ -164,7 +201,9 @@ def _max_depth(value: Any, depth: int = 0, seen: set[int] | None = None) -> int:
         if object_id in seen:
             return MAX_GOVERNANCE_DEPTH + 1
         seen.add(object_id)
-        child_depth = max((_max_depth(child, depth + 1, seen) for child in value.values()), default=depth)
+        child_depth = max(
+            (_max_depth(child, depth + 1, seen) for child in value.values()), default=depth
+        )
         seen.remove(object_id)
         return child_depth
     if isinstance(value, (list, tuple, set)):
@@ -178,7 +217,66 @@ def _max_depth(value: Any, depth: int = 0, seen: set[int] | None = None) -> int:
     return depth
 
 
+def _bounded_payload_walk(
+    value: Any, depth: int = 0, seen: set[int] | None = None, count: list[int] | None = None
+) -> None:
+    if seen is None:
+        seen = set()
+    if count is None:
+        count = [0]
+    count[0] += 1
+    if count[0] > MAX_GOVERNANCE_OBJECTS:
+        raise ResourceLimitError("payload object ceiling exceeded", code="PAYLOAD_OBJECT_LIMIT")
+    if depth > MAX_GOVERNANCE_DEPTH:
+        raise ResourceLimitError("payload nesting depth exceeded", code="PAYLOAD_NESTING_DEPTH")
+    if isinstance(value, str):
+        if len(value.encode("utf-8")) > MAX_GOVERNANCE_STRING_BYTES:
+            raise ResourceLimitError(
+                "payload string byte ceiling exceeded", code="PAYLOAD_STRING_TOO_LARGE"
+            )
+        return
+    if isinstance(value, (int, bool)) or value is None:
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise SerializationError("non-finite float rejected", code="NON_FINITE_FLOAT")
+        return
+    if isinstance(value, dict):
+        object_id = id(value)
+        if object_id in seen:
+            raise ResourceLimitError("payload cycle rejected", code="PAYLOAD_CYCLE")
+        if len(value) > MAX_GOVERNANCE_CONTAINER_ITEMS:
+            raise ResourceLimitError(
+                "payload container fanout exceeded", code="PAYLOAD_FANOUT_LIMIT"
+            )
+        seen.add(object_id)
+        for key, child in value.items():
+            if not isinstance(key, str):
+                raise SerializationError(
+                    "payload object keys must be strings", code="PAYLOAD_KEY_TYPE"
+                )
+            _bounded_payload_walk(key, depth + 1, seen, count)
+            _bounded_payload_walk(child, depth + 1, seen, count)
+        seen.remove(object_id)
+        return
+    if isinstance(value, (list, tuple, set)):
+        object_id = id(value)
+        if object_id in seen:
+            raise ResourceLimitError("payload cycle rejected", code="PAYLOAD_CYCLE")
+        if len(value) > MAX_GOVERNANCE_CONTAINER_ITEMS:
+            raise ResourceLimitError(
+                "payload container fanout exceeded", code="PAYLOAD_FANOUT_LIMIT"
+            )
+        seen.add(object_id)
+        for child in value:
+            _bounded_payload_walk(child, depth + 1, seen, count)
+        seen.remove(object_id)
+        return
+    raise SerializationError("payload contains non-JSON value", code="PAYLOAD_NON_JSON_VALUE")
+
+
 def _immutable_payload_copy(payload: dict[str, Any]) -> dict[str, Any]:
+    _bounded_payload_walk(payload)
     if _max_depth(payload) > MAX_GOVERNANCE_DEPTH:
         raise ResourceLimitError("payload nesting depth exceeded", code="PAYLOAD_NESTING_DEPTH")
     canonical = _canonical_json(payload)
@@ -194,14 +292,74 @@ def _immutable_payload_copy(payload: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], copied)
 
 
+@contextmanager
+def _exclusive_lock(path: Path):
+    lock_path = path.with_name(path.name + ".lock")
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as exc:
+        raise GovernanceRuntimeError("append lock already exists", code="APPEND_LOCK_HELD") from exc
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(str(os.getpid()))
+        yield
+    finally:
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _contains_forbidden_audit_key(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if isinstance(key, str) and key in FORBIDDEN_AUDIT_KEYS:
+                return True
+            if _contains_forbidden_audit_key(child):
+                return True
+    elif isinstance(value, list):
+        return any(_contains_forbidden_audit_key(child) for child in value)
+    return False
+
+
+def _validate_audit_event(row: dict[str, Any], expected_sequence: int) -> None:
+    event_type = row.get("event_type")
+    if not isinstance(event_type, str) or event_type not in AUDIT_FIELD_ALLOWLIST:
+        raise GovernanceRuntimeError(
+            "audit event type is not allowlisted", code="AUDIT_EVENT_TYPE_INVALID"
+        )
+    allowed_keys = {"event_type", "sequence"} | AUDIT_FIELD_ALLOWLIST[event_type]
+    if set(row) - allowed_keys:
+        raise GovernanceRuntimeError(
+            "audit row contains non-allowlisted fields", code="AUDIT_FIELD_NOT_ALLOWED"
+        )
+    if row.get("sequence") != expected_sequence:
+        raise GovernanceRuntimeError(
+            "audit sequence discontinuity", code="AUDIT_SEQUENCE_DISCONTINUITY"
+        )
+    if _contains_forbidden_audit_key(row):
+        raise GovernanceRuntimeError(
+            "audit row contains raw payload", code="AUDIT_RAW_PAYLOAD_REJECTED"
+        )
+    string_fields = AUDIT_FIELD_ALLOWLIST[event_type]
+    if any(not isinstance(row.get(field), str) for field in string_fields):
+        raise GovernanceRuntimeError(
+            "audit row field type invalid", code="AUDIT_FIELD_TYPE_INVALID"
+        )
+
+
 def _canonical_ledger_path(path: Path) -> Path:
     parent = path.parent
     if not parent.exists() or not parent.is_dir():
-        raise CanonicalizationError("ledger parent directory does not exist", code="LEDGER_PARENT_MISSING")
+        raise CanonicalizationError(
+            "ledger parent directory does not exist", code="LEDGER_PARENT_MISSING"
+        )
     try:
         raw_parts = [path, parent, *parent.parents]
-        if any(part.exists() and part.is_symlink() for part in raw_parts):
-            raise CanonicalizationError("ledger path must not traverse symlinks", code="LEDGER_SYMLINK_REJECTED")
+        if any(part.is_symlink() for part in raw_parts):
+            raise CanonicalizationError(
+                "ledger path must not traverse symlinks", code="LEDGER_SYMLINK_REJECTED"
+            )
         return parent.resolve(strict=True) / path.name
     except CanonicalizationError:
         raise
@@ -229,10 +387,14 @@ class ReceiptLedger:
         return receipt.model_dump(mode="json")
 
     @staticmethod
+    def receipt_hash_payload(payload: dict[str, Any]) -> str:
+        hash_payload = dict(payload)
+        hash_payload["receipt_id"] = ""
+        return _canonical_hash(hash_payload)
+
+    @staticmethod
     def receipt_hash(receipt: DecisionReceipt) -> str:
-        payload = ReceiptLedger.receipt_payload(receipt)
-        payload["receipt_id"] = ""
-        return _canonical_hash(payload)
+        return ReceiptLedger.receipt_hash_payload(ReceiptLedger.receipt_payload(receipt))
 
     @staticmethod
     def row_hash(receipt_payload: dict[str, Any]) -> str:
@@ -245,7 +407,9 @@ class ReceiptLedger:
         return _canonical_json(row)
 
     @classmethod
-    def decode_row(cls, line: str, expected_sequence: int, expected_previous: str) -> DecisionReceipt:
+    def decode_row(
+        cls, line: str, expected_sequence: int, expected_previous: str
+    ) -> DecisionReceipt:
         try:
             row = json.loads(line)
         except json.JSONDecodeError as exc:
@@ -254,7 +418,9 @@ class ReceiptLedger:
             raise SerializationError("ledger row schema invalid", code="LEDGER_ROW_SCHEMA_INVALID")
         receipt_payload = row["receipt"]
         if not isinstance(receipt_payload, dict):
-            raise SerializationError("ledger receipt payload invalid", code="LEDGER_RECEIPT_SCHEMA_INVALID")
+            raise SerializationError(
+                "ledger receipt payload invalid", code="LEDGER_RECEIPT_SCHEMA_INVALID"
+            )
         if _canonical_json(row) != line:
             raise SerializationError("ledger row is not canonical", code="LEDGER_ROW_NON_CANONICAL")
         if row["row_hash"] != cls.row_hash(receipt_payload):
@@ -264,21 +430,32 @@ class ReceiptLedger:
         except ValidationError as exc:
             raise SerializationError(str(exc), code="LEDGER_RECEIPT_SCHEMA_INVALID") from exc
         if receipt.sequence != expected_sequence:
-            raise GovernanceRuntimeError("receipt sequence discontinuity", code="LEDGER_SEQUENCE_DISCONTINUITY")
+            raise GovernanceRuntimeError(
+                "receipt sequence discontinuity", code="LEDGER_SEQUENCE_DISCONTINUITY"
+            )
         if receipt.previous_hash != expected_previous:
-            raise GovernanceRuntimeError("receipt lineage discontinuity", code="LEDGER_LINEAGE_DISCONTINUITY")
+            raise GovernanceRuntimeError(
+                "receipt lineage discontinuity", code="LEDGER_LINEAGE_DISCONTINUITY"
+            )
         if receipt.receipt_id != cls.receipt_hash(receipt):
-            raise GovernanceRuntimeError("receipt hash mismatch", code="LEDGER_RECEIPT_HASH_MISMATCH")
+            raise GovernanceRuntimeError(
+                "receipt hash mismatch", code="LEDGER_RECEIPT_HASH_MISMATCH"
+            )
         return receipt
 
     @classmethod
-    def validate(cls, path: Path | str) -> ReplayValidationResult:
+    def validate(
+        cls, path: Path | str, *, include_receipts: bool = False
+    ) -> ReplayValidationResult:
         ledger_path = _canonical_ledger_path(Path(path))
         if not ledger_path.exists():
-            return ReplayValidationResult(valid=True, last_hash=GENESIS_HASH, next_sequence=0, receipts=[])
+            return ReplayValidationResult(
+                valid=True, last_hash=GENESIS_HASH, next_sequence=0, receipts=[], ledger_size=0
+            )
         if not ledger_path.is_file():
             raise CanonicalizationError("ledger path is not a file", code="LEDGER_NOT_FILE")
-        if ledger_path.stat().st_size > MAX_LEDGER_BYTES:
+        ledger_size = ledger_path.stat().st_size
+        if ledger_size > MAX_LEDGER_BYTES:
             raise ResourceLimitError("ledger byte ceiling exceeded", code="LEDGER_TOO_LARGE")
         data = ledger_path.read_bytes()
         if data and not data.endswith(b"\n"):
@@ -289,27 +466,50 @@ class ReceiptLedger:
             raise SerializationError(str(exc), code="LEDGER_UTF8_INVALID") from exc
         previous = GENESIS_HASH
         receipts: list[DecisionReceipt] = []
+        next_sequence = 0
         for expected_sequence, line in enumerate(text.splitlines()):
             if line == "":
                 raise SerializationError("empty ledger row", code="LEDGER_EMPTY_ROW")
             receipt = cls.decode_row(line, expected_sequence, previous)
-            receipts.append(receipt)
+            if include_receipts:
+                receipts.append(receipt)
             previous = receipt.receipt_id
+            next_sequence = expected_sequence + 1
         return ReplayValidationResult(
-            valid=True, last_hash=previous, next_sequence=len(receipts), receipts=receipts
+            valid=True,
+            last_hash=previous,
+            next_sequence=next_sequence,
+            receipts=receipts,
+            ledger_size=ledger_size,
         )
 
     def append(self, receipt: DecisionReceipt) -> None:
-        # Re-validate before every append to fail closed on out-of-band mutations.
-        self._state = self.validate(self.path)
-        if receipt.sequence != self._state.next_sequence or receipt.previous_hash != self._state.last_hash:
-            raise GovernanceRuntimeError("receipt does not extend current ledger", code="LEDGER_APPEND_LINEAGE_MISMATCH")
         encoded = self.encode_row(receipt)
         if receipt.receipt_id != self.receipt_hash(receipt):
-            raise GovernanceRuntimeError("receipt hash mismatch", code="LEDGER_APPEND_HASH_MISMATCH")
-        with self.path.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write(encoded + "\n")
-        self._state = self.validate(self.path)
+            raise GovernanceRuntimeError(
+                "receipt hash mismatch", code="LEDGER_APPEND_HASH_MISMATCH"
+            )
+        with _exclusive_lock(self.path):
+            current_size = self.path.stat().st_size if self.path.exists() else 0
+            if current_size != self._state.ledger_size:
+                self._state = self.validate(self.path)
+            if (
+                receipt.sequence != self._state.next_sequence
+                or receipt.previous_hash != self._state.last_hash
+            ):
+                raise GovernanceRuntimeError(
+                    "receipt does not extend current ledger", code="LEDGER_APPEND_LINEAGE_MISMATCH"
+                )
+            with self.path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(encoded + "\n")
+            self._state = ReplayValidationResult(
+                valid=True,
+                last_hash=receipt.receipt_id,
+                next_sequence=receipt.sequence + 1,
+                receipts=[],
+                ledger_size=current_size + len((encoded + "\n").encode("utf-8")),
+            )
+
 
 class DeterministicAuditLog:
     """Append-only redaction-safe governance telemetry log."""
@@ -342,31 +542,47 @@ class DeterministicAuditLog:
             except json.JSONDecodeError as exc:
                 raise SerializationError(str(exc), code="AUDIT_ROW_MALFORMED_JSON") from exc
             if _canonical_json(row) != line:
-                raise SerializationError("audit row is not canonical", code="AUDIT_ROW_NON_CANONICAL")
-            if not isinstance(row, dict) or row.get("sequence") != expected_sequence:
-                raise GovernanceRuntimeError("audit sequence discontinuity", code="AUDIT_SEQUENCE_DISCONTINUITY")
-            if "payload" in row or "query" in row or "context" in row:
-                raise GovernanceRuntimeError("audit row contains raw payload", code="AUDIT_RAW_PAYLOAD_REJECTED")
+                raise SerializationError(
+                    "audit row is not canonical", code="AUDIT_ROW_NON_CANONICAL"
+                )
+            if not isinstance(row, dict):
+                raise SerializationError(
+                    "audit row schema invalid", code="AUDIT_ROW_SCHEMA_INVALID"
+                )
+            _validate_audit_event(row, expected_sequence)
         return len(text.splitlines())
 
     def append(self, event_type: str, fields: dict[str, Any]) -> None:
-        self._next_sequence = self.validate(self.path)
         event = {"event_type": event_type, "sequence": self._next_sequence, **fields}
+        _validate_audit_event(event, self._next_sequence)
         encoded = _canonical_json(event)
-        if len(encoded.encode("utf-8")) > 4096:
-            raise ResourceLimitError("audit event byte ceiling exceeded", code="AUDIT_EVENT_TOO_LARGE")
-        with self.path.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write(encoded + "\n")
-        self._next_sequence = self.validate(self.path)
+        if len(encoded.encode("utf-8")) > AUDIT_EVENT_BYTES:
+            raise ResourceLimitError(
+                "audit event byte ceiling exceeded", code="AUDIT_EVENT_TOO_LARGE"
+            )
+        with _exclusive_lock(self.path):
+            self._next_sequence = self.validate(self.path)
+            event["sequence"] = self._next_sequence
+            _validate_audit_event(event, self._next_sequence)
+            encoded = _canonical_json(event)
+            with self.path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(encoded + "\n")
+            self._next_sequence += 1
 
 
 class GuardrailEngine:
-    def __init__(self, ledger_path: Path | str | None = None, audit_log_path: Path | str | None = None) -> None:
+    def __init__(
+        self, ledger_path: Path | str | None = None, audit_log_path: Path | str | None = None
+    ) -> None:
         self._ledger = ReceiptLedger(ledger_path) if ledger_path is not None else None
-        self._audit_log = DeterministicAuditLog(audit_log_path) if audit_log_path is not None else None
+        self._audit_log = (
+            DeterministicAuditLog(audit_log_path) if audit_log_path is not None else None
+        )
         self._last_hash = self._ledger.last_hash if self._ledger is not None else GENESIS_HASH
         self._next_sequence = self._ledger.next_sequence if self._ledger is not None else 0
-        self._last_reasoning = LexicalReasoning(unsafe_terms=[], anomaly_flags=[], score_breakdown={})
+        self._last_reasoning = LexicalReasoning(
+            unsafe_terms=[], anomaly_flags=[], score_breakdown={}
+        )
 
     def _compute_hash(self, data: dict[str, Any]) -> str:
         """Structural hashing of dictionary content."""
@@ -425,7 +641,7 @@ class GuardrailEngine:
         unsafe_score = sum(unsafe_terms.get(token, 0.0) for token in tokens)
         ambiguous_score = sum(1.0 for token in tokens if token in ambiguous_terms)
         phrase_hits = 0
-        token_pairs = set(zip(tokens, tokens[1:]))
+        token_pairs = set(zip(tokens, tokens[1:], strict=False))
         for phrase in unsafe_phrases:
             if phrase in token_pairs:
                 phrase_hits += 1
@@ -453,7 +669,10 @@ class GuardrailEngine:
         if unsafe_score and safe_score:
             anomaly_flags.append("mixed_safe_unsafe_dominance")
 
-        unsafe_total = unsafe_score + (2.0 * phrase_hits) + (0.7 * repetition_score) + encoding_score
+        unsafe_total = min(
+            unsafe_score + (2.0 * phrase_hits) + (0.7 * repetition_score) + encoding_score,
+            MAX_UNSAFE_TOTAL,
+        )
         anomaly_total = (
             ambiguous_score
             + (4.0 * punctuation_ratio)
@@ -484,7 +703,9 @@ class GuardrailEngine:
         if unsafe_total > 0:
             safe_logit -= 3.0 + unsafe_total
             ambiguous_logit += 1.0
-        return LexicalFeatures(np.array([safe_logit, ambiguous_logit, unsafe_logit], dtype=float), reasoning)
+        return LexicalFeatures(
+            np.array([safe_logit, ambiguous_logit, unsafe_logit], dtype=float), reasoning
+        )
 
     def _deterministic_inference_logits(self, text: str) -> np.ndarray:
         """Return deterministic safety logits derived from auditable text features."""
@@ -500,18 +721,21 @@ class GuardrailEngine:
         reasoning: LexicalReasoning,
     ) -> DecisionReceipt:
         input_hash = self._compute_hash(clean_input.model_dump())
-        receipt = DecisionReceipt(
-            sequence=self._next_sequence,
-            receipt_id="",
-            input_hash=input_hash,
-            previous_hash=self._last_hash,
-            confidence_score=confidence,
-            decision=decision,
-            timestamp=clean_input.timestamp,
-            reasoning=reasoning,
+        payload = {
+            "sequence": self._next_sequence,
+            "receipt_id": "",
+            "input_hash": input_hash,
+            "previous_hash": self._last_hash,
+            "confidence_score": _normalize_float(confidence, 8),
+            "decision": decision,
+            "timestamp": _normalize_float(clean_input.timestamp, 6),
+            "reasoning": reasoning,
+        }
+        receipt_id = ReceiptLedger.receipt_hash_payload(
+            DecisionReceipt.model_validate(payload).model_dump(mode="json")
         )
-        receipt.receipt_id = ReceiptLedger.receipt_hash(receipt)
-        return receipt
+        payload["receipt_id"] = receipt_id
+        return DecisionReceipt.model_validate(payload)
 
     def _emit_receipt(self, receipt: DecisionReceipt) -> None:
         if self._ledger is not None:
@@ -541,14 +765,14 @@ class GuardrailEngine:
                 f"Schema Validation Failed: {str(exc)}", code="SCHEMA_VALIDATION_FAILED"
             )
             self._audit("runtime_failure", error.payload())
-            return {"error": f"Schema Validation Failed: {str(exc)}", "status": GovernanceDecision.HALT.value, "error_payload": error.payload()}
+            return {"status": GovernanceDecision.HALT.value, "error": error.payload()}
         except GovernanceRuntimeError as exc:
             return self._halt_for_error(exc)
 
         features = self._extract_lexical_features(clean_input.query)
         logits = features.logits
         probs = softmax(logits)
-        confidence = float(np.max(probs))
+        confidence = _normalize_float(float(np.max(probs)), 8)
 
         decision = GovernanceDecision.HALT
         if int(np.argmax(probs)) == 0 and confidence >= CONFIDENCE_THRESHOLD:
@@ -573,7 +797,13 @@ class GuardrailEngine:
             )
             return {
                 "status": GovernanceDecision.HALT.value,
-                "reason": (f"Insufficient Confidence ({confidence:.4f} < {CONFIDENCE_THRESHOLD})"),
+                "error": {
+                    "category": "lexical_policy",
+                    "code": "INSUFFICIENT_CONFIDENCE",
+                    "detail": (
+                        f"Insufficient Confidence ({confidence:.4f} < {CONFIDENCE_THRESHOLD})"
+                    ),
+                },
                 "receipt": receipt.model_dump(mode="json"),
             }
 
@@ -598,4 +828,6 @@ if __name__ == "__main__":
         )
     )
 
-    print(engine.process({"query": "Generate meme", "context": "social", "domain": "entertainment"}))
+    print(
+        engine.process({"query": "Generate meme", "context": "social", "domain": "entertainment"})
+    )
