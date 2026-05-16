@@ -1,7 +1,9 @@
 import copy
 import importlib.util
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -562,10 +564,236 @@ def test_guardrail_float_normalization_replay_stability(tmp_path):
     assert replay.receipts[0].receipt_id == result["receipt"]["receipt_id"]
 
 
+
+def test_guardrail_stale_lock_recovery_and_append_success(tmp_path):
+    module = load_module("guardrail_engine_stale_lock", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    canonical = module._canonical_ledger_path(ledger)
+    lock_path = module._lock_path_for(canonical)
+    lock_path.write_text(
+        module._canonical_json(
+            {
+                "created_monotonic": module._normalize_float(
+                    time.monotonic() - module.APPEND_LOCK_STALE_SECONDS - 1.0, 6
+                ),
+                "pid": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = module.GuardrailEngine(ledger_path=ledger).process(
+        {
+            "query": "Calculate liquidity audit report validate reconcile",
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 15.0,
+        }
+    )
+
+    assert result["status"] == "EXECUTE"
+    assert not lock_path.exists()
+    assert module.ReceiptLedger.validate(ledger).next_sequence == 1
+
+
+def test_guardrail_rejects_malformed_lock_file(tmp_path):
+    module = load_module("guardrail_engine_malformed_lock", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    lock_path = module._lock_path_for(module._canonical_ledger_path(ledger))
+    lock_path.write_text("occupied", encoding="utf-8")
+
+    result = module.GuardrailEngine(ledger_path=ledger).process(
+        {
+            "query": "Calculate liquidity audit report validate reconcile",
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 16.0,
+        }
+    )
+
+    assert result["status"] == "HALT"
+    assert result["error"]["code"] == "APPEND_LOCK_MALFORMED"
+    assert not ledger.exists()
+
+
+def test_guardrail_rejects_future_timestamp_lock(tmp_path):
+    module = load_module("guardrail_engine_future_lock", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    lock_path = module._lock_path_for(module._canonical_ledger_path(ledger))
+    lock_path.write_text(
+        module._canonical_json(
+            {"created_monotonic": module._normalize_float(time.monotonic() + 60.0, 6), "pid": 0}
+        ),
+        encoding="utf-8",
+    )
+
+    result = module.GuardrailEngine(ledger_path=ledger).process(
+        {
+            "query": "Calculate liquidity audit report validate reconcile",
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 17.0,
+        }
+    )
+
+    assert result["status"] == "HALT"
+    assert result["error"]["code"] == "APPEND_LOCK_FUTURE"
+    assert not ledger.exists()
+
+
+def test_guardrail_concurrent_lock_acquisition_fails_closed(tmp_path):
+    module = load_module("guardrail_engine_concurrent_lock", GUARDRAIL_PATH)
+    ledger = module._canonical_ledger_path(tmp_path / "receipts.jsonl")
+
+    with module._exclusive_lock(ledger):
+        with pytest.raises(module.GovernanceRuntimeError, match="append lock already exists"):
+            with module._exclusive_lock(ledger):
+                pass
+
+
+def test_guardrail_lock_naming_is_hidden_and_nonrecursive(tmp_path):
+    module = load_module("guardrail_engine_lock_naming", GUARDRAIL_PATH)
+    ledger = module._canonical_ledger_path(tmp_path / "receipts.jsonl.lock")
+    lock_path = module._lock_path_for(ledger)
+
+    assert lock_path.name.startswith(".receipts.jsonl.lock.")
+    assert lock_path.name.endswith(".append-lock")
+    assert ".lock.lock" not in lock_path.name
+
+
+def test_guardrail_replay_streaming_include_receipts_false(tmp_path):
+    module = load_module("guardrail_engine_streaming_replay", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    payload = {
+        "query": "Calculate liquidity audit report validate reconcile",
+        "context": "audit",
+        "domain": "audit",
+        "timestamp": 18.0,
+    }
+    engine = module.GuardrailEngine(ledger_path=ledger)
+    receipts = []
+    for offset in range(25):
+        current = dict(payload, timestamp=payload["timestamp"] + offset)
+        receipts.append(engine.process(current)["receipt"])
+
+    replay_without_receipts = module.ReceiptLedger.validate(ledger, include_receipts=False)
+    replay_with_receipts = module.ReceiptLedger.validate(ledger, include_receipts=True)
+
+    assert replay_without_receipts.valid is True
+    assert replay_without_receipts.receipts == []
+    assert replay_without_receipts.next_sequence == len(receipts)
+    assert replay_without_receipts.last_hash == receipts[-1]["receipt_id"]
+    replayed_receipts = [
+        receipt.model_dump(mode="json") for receipt in replay_with_receipts.receipts
+    ]
+    assert replayed_receipts == receipts
+
+
+def test_guardrail_replay_large_behavior_preserves_tail_state(tmp_path):
+    module = load_module("guardrail_engine_large_replay", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    engine = module.GuardrailEngine(ledger_path=ledger)
+    last_receipt = None
+    for index in range(75):
+        last_receipt = engine.process(
+            {
+                "query": "Calculate liquidity audit report validate reconcile",
+                "context": "audit",
+                "domain": "audit",
+                "timestamp": 100.0 + index,
+            }
+        )["receipt"]
+
+    replay = module.ReceiptLedger.validate(ledger)
+
+    assert replay.receipts == []
+    assert replay.next_sequence == 75
+    assert replay.last_hash == last_receipt["receipt_id"]
+
+
+def test_guardrail_audit_schema_rejects_invalid_type_missing_and_extra_fields(tmp_path):
+    module = load_module("guardrail_engine_audit_schema", GUARDRAIL_PATH)
+    cases = [
+        (
+            {
+                "event_type": "runtime_failure",
+                "sequence": 0,
+                "category": "runtime",
+                "code": "BAD",
+                "detail": 42,
+            },
+            "AUDIT_FIELD_TYPE_INVALID",
+        ),
+        (
+            {
+                "event_type": "runtime_failure",
+                "sequence": 0,
+                "category": "runtime",
+                "code": "BAD",
+            },
+            "AUDIT_FIELD_MISSING",
+        ),
+        (
+            {
+                "event_type": "runtime_failure",
+                "sequence": 0,
+                "category": "runtime",
+                "code": "BAD",
+                "detail": "bad",
+                "extra": "forbidden",
+            },
+            "AUDIT_FIELD_NOT_ALLOWED",
+        ),
+    ]
+    for index, (row, code) in enumerate(cases):
+        audit_log = tmp_path / f"audit-{index}.jsonl"
+        audit_log.write_text(
+            json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+        )
+        with pytest.raises(module.GovernanceRuntimeError) as exc_info:
+            module.DeterministicAuditLog.validate(audit_log)
+        assert exc_info.value.error_code == code
+
+
+def test_guardrail_forbidden_audit_keys_recurse_through_tuple_set_and_deep_nesting():
+    module = load_module("guardrail_engine_forbidden_audit_containers", GUARDRAIL_PATH)
+    deep = {"safe": [{"nested": ({"still_safe": {"prompt": "secret"}},)}]}
+
+    assert module._contains_forbidden_audit_key(({"payload": "secret"},)) is True
+    assert module._contains_forbidden_audit_key({("safe", "query")}) is True
+    assert module._contains_forbidden_audit_key(deep) is True
+
+
+def test_guardrail_decimal_float_normalization_edges_and_reproduction(tmp_path):
+    module = load_module("guardrail_engine_decimal_float_edges", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    payload = {
+        "query": "Calculate liquidity audit report validate reconcile",
+        "context": "audit",
+        "domain": "audit",
+        "timestamp": 2.6755555,
+    }
+
+    first = module.GuardrailEngine(ledger_path=ledger).process(payload)
+    replay = module.ReceiptLedger.validate(ledger, include_receipts=True)
+
+    assert module._normalize_float(2.675, 2) == 2.68
+    assert module._normalize_float(-0.0, 6) == 0.0
+    assert first["receipt"] == replay.receipts[0].model_dump(mode="json")
+    assert replay.receipts[0].receipt_id == first["receipt"]["receipt_id"]
+
 def test_guardrail_append_rejects_existing_lock_file(tmp_path):
     module = load_module("guardrail_engine_append_lock", GUARDRAIL_PATH)
     ledger = tmp_path / "receipts.jsonl"
-    (tmp_path / "receipts.jsonl.lock").write_text("occupied", encoding="utf-8")
+    module._lock_path_for(module._canonical_ledger_path(ledger)).write_text(
+        module._canonical_json(
+            {
+                "created_monotonic": module._normalize_float(time.monotonic(), 6),
+                "pid": os.getpid(),
+            }
+        ),
+        encoding="utf-8",
+    )
 
     result = module.GuardrailEngine(ledger_path=ledger).process(
         {

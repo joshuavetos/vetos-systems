@@ -4,8 +4,10 @@ import json
 import math
 import os
 import string
+import time
 from collections import Counter
 from contextlib import contextmanager
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 from enum import Enum
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, cast
@@ -27,10 +29,17 @@ MAX_GOVERNANCE_CONTAINER_ITEMS = 2_000
 MAX_UNSAFE_TOTAL = 12.0
 MAX_QUERY_BYTES = 16_384
 AUDIT_EVENT_BYTES = 4_096
+APPEND_LOCK_STALE_SECONDS = 300.0
 FORBIDDEN_AUDIT_KEYS = {"payload", "query", "context", "raw_query", "prompt", "input"}
-AUDIT_FIELD_ALLOWLIST = {
-    "policy_denial": {"category", "code", "decision", "input_hash", "receipt_id"},
-    "runtime_failure": {"category", "code", "detail"},
+AUDIT_FIELD_SCHEMAS = {
+    "policy_denial": {
+        "category": str,
+        "code": str,
+        "decision": str,
+        "input_hash": str,
+        "receipt_id": str,
+    },
+    "runtime_failure": {"category": str, "code": str, "detail": str},
 }
 
 
@@ -188,97 +197,87 @@ def _canonical_hash(data: Any) -> str:
 def _normalize_float(value: float, places: int) -> float:
     if not math.isfinite(value):
         raise SerializationError("non-finite float rejected", code="NON_FINITE_FLOAT")
-    return round(float(value), places)
+    quantizer = Decimal("1").scaleb(-places)
+    try:
+        normalized = Decimal(str(float(value))).quantize(quantizer, rounding=ROUND_HALF_EVEN)
+    except (InvalidOperation, ValueError) as exc:
+        raise SerializationError(str(exc), code="FLOAT_NORMALIZATION_FAILED") from exc
+    if normalized.is_zero():
+        return 0.0
+    return float(normalized)
 
 
-def _max_depth(value: Any, depth: int = 0, seen: set[int] | None = None) -> int:
-    if seen is None:
-        seen = set()
-    if depth > MAX_GOVERNANCE_DEPTH:
-        return depth
-    if isinstance(value, dict):
-        object_id = id(value)
-        if object_id in seen:
-            return MAX_GOVERNANCE_DEPTH + 1
-        seen.add(object_id)
-        child_depth = max(
-            (_max_depth(child, depth + 1, seen) for child in value.values()), default=depth
-        )
-        seen.remove(object_id)
-        return child_depth
-    if isinstance(value, (list, tuple, set)):
-        object_id = id(value)
-        if object_id in seen:
-            return MAX_GOVERNANCE_DEPTH + 1
-        seen.add(object_id)
-        child_depth = max((_max_depth(child, depth + 1, seen) for child in value), default=depth)
-        seen.remove(object_id)
-        return child_depth
-    return depth
+def _validate_payload_structure(value: Any) -> None:
+    seen: set[int] = set()
+    count = 0
 
-
-def _bounded_payload_walk(
-    value: Any, depth: int = 0, seen: set[int] | None = None, count: list[int] | None = None
-) -> None:
-    if seen is None:
-        seen = set()
-    if count is None:
-        count = [0]
-    count[0] += 1
-    if count[0] > MAX_GOVERNANCE_OBJECTS:
-        raise ResourceLimitError("payload object ceiling exceeded", code="PAYLOAD_OBJECT_LIMIT")
-    if depth > MAX_GOVERNANCE_DEPTH:
-        raise ResourceLimitError("payload nesting depth exceeded", code="PAYLOAD_NESTING_DEPTH")
-    if isinstance(value, str):
-        if len(value.encode("utf-8")) > MAX_GOVERNANCE_STRING_BYTES:
-            raise ResourceLimitError(
-                "payload string byte ceiling exceeded", code="PAYLOAD_STRING_TOO_LARGE"
-            )
-        return
-    if isinstance(value, (int, bool)) or value is None:
-        return
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise SerializationError("non-finite float rejected", code="NON_FINITE_FLOAT")
-        return
-    if isinstance(value, dict):
-        object_id = id(value)
-        if object_id in seen:
-            raise ResourceLimitError("payload cycle rejected", code="PAYLOAD_CYCLE")
-        if len(value) > MAX_GOVERNANCE_CONTAINER_ITEMS:
-            raise ResourceLimitError(
-                "payload container fanout exceeded", code="PAYLOAD_FANOUT_LIMIT"
-            )
-        seen.add(object_id)
-        for key, child in value.items():
-            if not isinstance(key, str):
-                raise SerializationError(
-                    "payload object keys must be strings", code="PAYLOAD_KEY_TYPE"
+    def walk(node: Any, depth: int) -> None:
+        nonlocal count
+        count += 1
+        if count > MAX_GOVERNANCE_OBJECTS:
+            raise ResourceLimitError("payload object ceiling exceeded", code="PAYLOAD_OBJECT_LIMIT")
+        if depth > MAX_GOVERNANCE_DEPTH:
+            raise ResourceLimitError("payload nesting depth exceeded", code="PAYLOAD_NESTING_DEPTH")
+        if isinstance(node, str):
+            if len(node.encode("utf-8")) > MAX_GOVERNANCE_STRING_BYTES:
+                raise ResourceLimitError(
+                    "payload string byte ceiling exceeded", code="PAYLOAD_STRING_TOO_LARGE"
                 )
-            _bounded_payload_walk(key, depth + 1, seen, count)
-            _bounded_payload_walk(child, depth + 1, seen, count)
-        seen.remove(object_id)
-        return
-    if isinstance(value, (list, tuple, set)):
-        object_id = id(value)
-        if object_id in seen:
-            raise ResourceLimitError("payload cycle rejected", code="PAYLOAD_CYCLE")
-        if len(value) > MAX_GOVERNANCE_CONTAINER_ITEMS:
-            raise ResourceLimitError(
-                "payload container fanout exceeded", code="PAYLOAD_FANOUT_LIMIT"
+            return
+        if isinstance(node, bool) or node is None:
+            return
+        if isinstance(node, int):
+            return
+        if isinstance(node, float):
+            if not math.isfinite(node):
+                raise SerializationError("non-finite float rejected", code="NON_FINITE_FLOAT")
+            return
+        if isinstance(node, dict):
+            object_id = id(node)
+            if object_id in seen:
+                raise ResourceLimitError("payload cycle rejected", code="PAYLOAD_CYCLE")
+            if len(node) > MAX_GOVERNANCE_CONTAINER_ITEMS:
+                raise ResourceLimitError(
+                    "payload container fanout exceeded", code="PAYLOAD_FANOUT_LIMIT"
+                )
+            seen.add(object_id)
+            try:
+                for key, child in node.items():
+                    if not isinstance(key, str):
+                        raise SerializationError(
+                            "payload object keys must be strings", code="PAYLOAD_KEY_TYPE"
+                        )
+                    walk(key, depth + 1)
+                    walk(child, depth + 1)
+            finally:
+                seen.remove(object_id)
+            return
+        if isinstance(node, (list, tuple)):
+            object_id = id(node)
+            if object_id in seen:
+                raise ResourceLimitError("payload cycle rejected", code="PAYLOAD_CYCLE")
+            if len(node) > MAX_GOVERNANCE_CONTAINER_ITEMS:
+                raise ResourceLimitError(
+                    "payload container fanout exceeded", code="PAYLOAD_FANOUT_LIMIT"
+                )
+            seen.add(object_id)
+            try:
+                for child in node:
+                    walk(child, depth + 1)
+            finally:
+                seen.remove(object_id)
+            return
+        if isinstance(node, set):
+            raise SerializationError(
+                "payload contains non-JSON value", code="PAYLOAD_NON_JSON_VALUE"
             )
-        seen.add(object_id)
-        for child in value:
-            _bounded_payload_walk(child, depth + 1, seen, count)
-        seen.remove(object_id)
-        return
-    raise SerializationError("payload contains non-JSON value", code="PAYLOAD_NON_JSON_VALUE")
+        raise SerializationError("payload contains non-JSON value", code="PAYLOAD_NON_JSON_VALUE")
+
+    walk(value, 0)
 
 
 def _immutable_payload_copy(payload: dict[str, Any]) -> dict[str, Any]:
-    _bounded_payload_walk(payload)
-    if _max_depth(payload) > MAX_GOVERNANCE_DEPTH:
-        raise ResourceLimitError("payload nesting depth exceeded", code="PAYLOAD_NESTING_DEPTH")
+    _validate_payload_structure(payload)
     canonical = _canonical_json(payload)
     size = len(canonical.encode("utf-8"))
     if size > MAX_GOVERNANCE_PAYLOAD_BYTES:
@@ -292,16 +291,114 @@ def _immutable_payload_copy(payload: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], copied)
 
 
-@contextmanager
-def _exclusive_lock(path: Path):
-    lock_path = path.with_name(path.name + ".lock")
+def _lock_path_for(path: Path) -> Path:
+    lock_name = f".{path.name}.{_sha256_text(str(path))[:16]}.append-lock"
+    return path.with_name(lock_name)
+
+
+def _pid_exists(pid: int) -> bool | None:
+    if pid <= 0:
+        return False
+    if not hasattr(os, "kill"):
+        return None
     try:
-        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return None
+    return True
+
+
+def _read_lock_payload(lock_path: Path, now: float) -> dict[str, Any]:
+    try:
+        raw = lock_path.read_text(encoding="utf-8")
+        payload = json.loads(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise GovernanceRuntimeError(
+            "append lock is malformed", code="APPEND_LOCK_MALFORMED"
+        ) from exc
+    if _canonical_json(payload) != raw:
+        raise GovernanceRuntimeError("append lock is malformed", code="APPEND_LOCK_MALFORMED")
+    if not isinstance(payload, dict):
+        raise GovernanceRuntimeError("append lock is malformed", code="APPEND_LOCK_MALFORMED")
+    if set(payload) != {"created_monotonic", "pid"}:
+        raise GovernanceRuntimeError("append lock is malformed", code="APPEND_LOCK_MALFORMED")
+    pid = payload["pid"]
+    created = payload["created_monotonic"]
+    if not isinstance(pid, int) or isinstance(pid, bool):
+        raise GovernanceRuntimeError("append lock is malformed", code="APPEND_LOCK_MALFORMED")
+    if (
+        not isinstance(created, (int, float))
+        or isinstance(created, bool)
+        or not math.isfinite(created)
+    ):
+        raise GovernanceRuntimeError("append lock is malformed", code="APPEND_LOCK_MALFORMED")
+    if float(created) > now:
+        raise GovernanceRuntimeError(
+            "append lock timestamp is in the future", code="APPEND_LOCK_FUTURE"
+        )
+    return {"pid": pid, "created_monotonic": float(created)}
+
+
+def _cleanup_stale_lock(lock_path: Path) -> None:
+    cleanup_path = lock_path.with_name(lock_path.name + ".reap")
+    try:
+        cleanup_fd = os.open(cleanup_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError as exc:
-        raise GovernanceRuntimeError("append lock already exists", code="APPEND_LOCK_HELD") from exc
+        raise GovernanceRuntimeError(
+            "append lock cleanup state is ambiguous", code="APPEND_LOCK_CLEANUP_AMBIGUOUS"
+        ) from exc
+    try:
+        os.close(cleanup_fd)
+        try:
+            os.replace(lock_path, cleanup_path)
+        except FileNotFoundError:
+            return
+        cleanup_path.unlink()
+    except OSError as exc:
+        raise GovernanceRuntimeError(str(exc), code="APPEND_LOCK_CLEANUP_FAILED") from exc
+    finally:
+        try:
+            cleanup_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _recover_stale_lock_if_safe(lock_path: Path, stale_seconds: float) -> None:
+    now = time.monotonic()
+    payload = _read_lock_payload(lock_path, now)
+    age = now - payload["created_monotonic"]
+    if age < stale_seconds:
+        raise GovernanceRuntimeError("append lock already exists", code="APPEND_LOCK_HELD")
+    pid_state = _pid_exists(payload["pid"])
+    if pid_state is True:
+        raise GovernanceRuntimeError("append lock owner is still running", code="APPEND_LOCK_HELD")
+    if pid_state is None:
+        raise GovernanceRuntimeError(
+            "append lock owner state cannot be verified", code="APPEND_LOCK_STATE_UNKNOWN"
+        )
+    _cleanup_stale_lock(lock_path)
+
+
+@contextmanager
+def _exclusive_lock(path: Path, stale_seconds: float = APPEND_LOCK_STALE_SECONDS):
+    lock_path = _lock_path_for(path)
+    payload = {"created_monotonic": _normalize_float(time.monotonic(), 6), "pid": os.getpid()}
+    encoded = _canonical_json(payload)
+    fd: int | None = None
+    while fd is None:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            _recover_stale_lock_if_safe(lock_path, stale_seconds)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(str(os.getpid()))
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
         yield
     finally:
         try:
@@ -317,18 +414,22 @@ def _contains_forbidden_audit_key(value: Any) -> bool:
                 return True
             if _contains_forbidden_audit_key(child):
                 return True
-    elif isinstance(value, list):
-        return any(_contains_forbidden_audit_key(child) for child in value)
+    elif isinstance(value, (list, tuple, set)):
+        return any(
+            (isinstance(child, str) and child in FORBIDDEN_AUDIT_KEYS)
+            or _contains_forbidden_audit_key(child)
+            for child in value
+        )
     return False
 
 
 def _validate_audit_event(row: dict[str, Any], expected_sequence: int) -> None:
     event_type = row.get("event_type")
-    if not isinstance(event_type, str) or event_type not in AUDIT_FIELD_ALLOWLIST:
+    if not isinstance(event_type, str) or event_type not in AUDIT_FIELD_SCHEMAS:
         raise GovernanceRuntimeError(
             "audit event type is not allowlisted", code="AUDIT_EVENT_TYPE_INVALID"
         )
-    allowed_keys = {"event_type", "sequence"} | AUDIT_FIELD_ALLOWLIST[event_type]
+    allowed_keys = {"event_type", "sequence"} | set(AUDIT_FIELD_SCHEMAS[event_type])
     if set(row) - allowed_keys:
         raise GovernanceRuntimeError(
             "audit row contains non-allowlisted fields", code="AUDIT_FIELD_NOT_ALLOWED"
@@ -341,8 +442,15 @@ def _validate_audit_event(row: dict[str, Any], expected_sequence: int) -> None:
         raise GovernanceRuntimeError(
             "audit row contains raw payload", code="AUDIT_RAW_PAYLOAD_REJECTED"
         )
-    string_fields = AUDIT_FIELD_ALLOWLIST[event_type]
-    if any(not isinstance(row.get(field), str) for field in string_fields):
+    field_schema = AUDIT_FIELD_SCHEMAS[event_type]
+    if any(field not in row for field in field_schema):
+        raise GovernanceRuntimeError(
+            "audit row missing required field", code="AUDIT_FIELD_MISSING"
+        )
+    if any(
+        not isinstance(row[field], expected_type)
+        for field, expected_type in field_schema.items()
+    ):
         raise GovernanceRuntimeError(
             "audit row field type invalid", code="AUDIT_FIELD_TYPE_INVALID"
         )
@@ -457,24 +565,28 @@ class ReceiptLedger:
         ledger_size = ledger_path.stat().st_size
         if ledger_size > MAX_LEDGER_BYTES:
             raise ResourceLimitError("ledger byte ceiling exceeded", code="LEDGER_TOO_LARGE")
-        data = ledger_path.read_bytes()
-        if data and not data.endswith(b"\n"):
-            raise SerializationError("ledger row is truncated", code="LEDGER_TRUNCATED_ROW")
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise SerializationError(str(exc), code="LEDGER_UTF8_INVALID") from exc
         previous = GENESIS_HASH
         receipts: list[DecisionReceipt] = []
         next_sequence = 0
-        for expected_sequence, line in enumerate(text.splitlines()):
-            if line == "":
-                raise SerializationError("empty ledger row", code="LEDGER_EMPTY_ROW")
-            receipt = cls.decode_row(line, expected_sequence, previous)
-            if include_receipts:
-                receipts.append(receipt)
-            previous = receipt.receipt_id
-            next_sequence = expected_sequence + 1
+        last_line_ended = True
+        with ledger_path.open("rb") as handle:
+            for expected_sequence, raw_line in enumerate(handle):
+                if not raw_line.endswith(b"\n"):
+                    last_line_ended = False
+                line_bytes = raw_line[:-1] if raw_line.endswith(b"\n") else raw_line
+                if line_bytes == b"":
+                    raise SerializationError("empty ledger row", code="LEDGER_EMPTY_ROW")
+                try:
+                    line = line_bytes.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise SerializationError(str(exc), code="LEDGER_UTF8_INVALID") from exc
+                receipt = cls.decode_row(line, expected_sequence, previous)
+                if include_receipts:
+                    receipts.append(receipt)
+                previous = receipt.receipt_id
+                next_sequence = expected_sequence + 1
+        if ledger_size and not last_line_ended:
+            raise SerializationError("ledger row is truncated", code="LEDGER_TRUNCATED_ROW")
         return ReplayValidationResult(
             valid=True,
             last_hash=previous,
@@ -525,32 +637,39 @@ class DeterministicAuditLog:
             return 0
         if not audit_path.is_file():
             raise CanonicalizationError("audit path is not a file", code="AUDIT_NOT_FILE")
-        if audit_path.stat().st_size > MAX_AUDIT_BYTES:
+        audit_size = audit_path.stat().st_size
+        if audit_size > MAX_AUDIT_BYTES:
             raise ResourceLimitError("audit log byte ceiling exceeded", code="AUDIT_TOO_LARGE")
-        data = audit_path.read_bytes()
-        if data and not data.endswith(b"\n"):
+        next_sequence = 0
+        last_line_ended = True
+        with audit_path.open("rb") as handle:
+            for expected_sequence, raw_line in enumerate(handle):
+                if not raw_line.endswith(b"\n"):
+                    last_line_ended = False
+                line_bytes = raw_line[:-1] if raw_line.endswith(b"\n") else raw_line
+                if not line_bytes:
+                    raise SerializationError("empty audit row", code="AUDIT_EMPTY_ROW")
+                try:
+                    line = line_bytes.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise SerializationError(str(exc), code="AUDIT_UTF8_INVALID") from exc
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise SerializationError(str(exc), code="AUDIT_ROW_MALFORMED_JSON") from exc
+                if _canonical_json(row) != line:
+                    raise SerializationError(
+                        "audit row is not canonical", code="AUDIT_ROW_NON_CANONICAL"
+                    )
+                if not isinstance(row, dict):
+                    raise SerializationError(
+                        "audit row schema invalid", code="AUDIT_ROW_SCHEMA_INVALID"
+                    )
+                _validate_audit_event(row, expected_sequence)
+                next_sequence = expected_sequence + 1
+        if audit_size and not last_line_ended:
             raise SerializationError("audit row is truncated", code="AUDIT_TRUNCATED_ROW")
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise SerializationError(str(exc), code="AUDIT_UTF8_INVALID") from exc
-        for expected_sequence, line in enumerate(text.splitlines()):
-            if not line:
-                raise SerializationError("empty audit row", code="AUDIT_EMPTY_ROW")
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise SerializationError(str(exc), code="AUDIT_ROW_MALFORMED_JSON") from exc
-            if _canonical_json(row) != line:
-                raise SerializationError(
-                    "audit row is not canonical", code="AUDIT_ROW_NON_CANONICAL"
-                )
-            if not isinstance(row, dict):
-                raise SerializationError(
-                    "audit row schema invalid", code="AUDIT_ROW_SCHEMA_INVALID"
-                )
-            _validate_audit_event(row, expected_sequence)
-        return len(text.splitlines())
+        return next_sequence
 
     def append(self, event_type: str, fields: dict[str, Any]) -> None:
         event = {"event_type": event_type, "sequence": self._next_sequence, **fields}
@@ -641,7 +760,7 @@ class GuardrailEngine:
         unsafe_score = sum(unsafe_terms.get(token, 0.0) for token in tokens)
         ambiguous_score = sum(1.0 for token in tokens if token in ambiguous_terms)
         phrase_hits = 0
-        token_pairs = set(zip(tokens, tokens[1:], strict=False))
+        token_pairs = set(zip(tokens, tokens[1:]))  # noqa: B905
         for phrase in unsafe_phrases:
             if phrase in token_pairs:
                 phrase_hits += 1
