@@ -9,7 +9,7 @@ Decisions:
 """
 
 from enum import Enum
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 from dataclasses import dataclass
 from pathlib import Path
 import json

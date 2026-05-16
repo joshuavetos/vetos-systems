@@ -7,7 +7,6 @@ No external services. No databases. Deterministic.
 
 import streamlit as st
 import json
-from pathlib import Path
 from gate import VerificationGate, Decision
 
 

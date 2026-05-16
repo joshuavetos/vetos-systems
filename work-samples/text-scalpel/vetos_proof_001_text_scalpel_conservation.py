@@ -1,6 +1,9 @@
 # vetos_gate.py
 
-import json, sys, time, hashlib
+import json
+import sys
+import time
+import hashlib
 
 RECEIPT_FILE = "receipt.qual.json"
 SCHEMA_URI = "exq://spec/v1"

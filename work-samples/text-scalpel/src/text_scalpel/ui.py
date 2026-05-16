@@ -41,10 +41,12 @@ class ScalpelDashboard:
             self.source_input.value = f.read()
 
     def save_file(self, _):
-        if not self.current_file_path: return
+        if not self.current_file_path:
+            return
         with open(self.current_file_path, 'w') as f:
             f.write(self.source_input.value)
-        with self.output_area: print(f"Saved to {self.current_file_path}")
+        with self.output_area:
+            print(f"Saved to {self.current_file_path}")
 
     def execute(self, _):
         with self.output_area:

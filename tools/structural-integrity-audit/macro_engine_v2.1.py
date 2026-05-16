@@ -1,6 +1,5 @@
 import os
 import yfinance as yf
-import pandas as pd
 import numpy as np
 from arch import arch_model
 from fredapi import Fred
@@ -63,8 +62,8 @@ class VetosProportionalController:
         
         # 6. Regime Identification & Fail-Closed Enforcement
         conditions = [
-            (df['trap_signal'] == True),
-            (df['entropy_veto'] == True)
+            df['trap_signal'],
+            df['entropy_veto']
         ]
         choices = ['EXPLOSIVE', 'DECEPTIVE']
         df['regime_status'] = np.select(conditions, choices, default='STABLE')

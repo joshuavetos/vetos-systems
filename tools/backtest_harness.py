@@ -1,4 +1,3 @@
-import pandas as pd
 import numpy as np
 
 def run_performance_audit(price_df, engine_df):

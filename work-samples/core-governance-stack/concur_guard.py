@@ -117,8 +117,10 @@ def run_demo():
     verdict = save_ledger(receipts)
     print(f"\nFinal Verdict: {verdict}")
     if verdict == "MERGE_BLOCKED":
-        if CI_MODE: raise SystemExit(1)
-        else: print("Fail-closed triggered (CI disabled in Colab).")
+        if CI_MODE:
+            raise SystemExit(1)
+        else:
+            print("Fail-closed triggered (CI disabled in Colab).")
 
 if __name__ == "__main__":
     run_demo()
