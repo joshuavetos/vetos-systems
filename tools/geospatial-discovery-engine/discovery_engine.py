@@ -33,6 +33,7 @@ MIN_PIXEL_SPAN = 15  # 150m @ 10m resolution
 # INITIALIZATION
 # ---------------------------------------------------------------------
 
+
 def _require_module(module_name):
     root_module = module_name.split(".", 1)[0]
     if importlib.util.find_spec(root_module) is None:
@@ -65,6 +66,7 @@ def initialize_ee():
         ee.Initialize(project=PROJECT_ID)
     return ee
 
+
 # ---------------------------------------------------------------------
 # TIER 1: LOCALIZED Z-SCORE (GRD)
 # ---------------------------------------------------------------------
@@ -84,20 +86,20 @@ def compute_local_z(image, point, buffer_dist=500):
     ee = _require_earth_engine()
     ambient = point.buffer(buffer_dist).difference(point.buffer(100))
     stats = image.reduceRegion(
-        reducer=ee.Reducer.mean().combine(
-            ee.Reducer.stdDev(), sharedInputs=True
-        ),
+        reducer=ee.Reducer.mean().combine(ee.Reducer.stdDev(), sharedInputs=True),
         geometry=ambient,
         scale=10,
-        maxPixels=1e9
+        maxPixels=1e9,
     )
     mu = ee.Number(stats.get("VV_mean"))
     sigma = ee.Number(stats.get("VV_stdDev"))
     return image.subtract(mu).divide(sigma)
 
+
 # ---------------------------------------------------------------------
 # TIER 2: TEMPORAL STABILITY (SLC COHERENCE)
 # ---------------------------------------------------------------------
+
 
 def validate_mean_coherence(mean_coherence):
     if mean_coherence is None:
@@ -117,26 +119,42 @@ def validate_mean_coherence(mean_coherence):
 def compute_mean_coherence(coherence_image, geometry, scale=20, band_name="coherence"):
     """Compute mean coherence from a prepared Earth Engine coherence image.
 
-    The repository does not include an InSAR processor, but it can audit a
-    completed coherence raster.  The caller supplies the prepared
-    ``coherence_image`` and the Earth Engine ``geometry`` to reduce; this
-    function performs the numeric reduction consumed by ``run_discovery``.
+    Returns ``None`` when Earth Engine reduction fails, the requested band is
+    missing, or the reduced value is not finite. Discovery callers treat ``None``
+    as fail-closed instead of allowing external EE runtime failures to crash a
+    run.
     """
-    ee = _require_earth_engine()
-    stats = coherence_image.reduceRegion(
-        reducer=ee.Reducer.mean(),
-        geometry=geometry,
-        scale=scale,
-        maxPixels=1e9,
-    )
-    value = stats.get(band_name).getInfo()
+    try:
+        ee = _require_earth_engine()
+        stats = coherence_image.reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=geometry,
+            scale=scale,
+            maxPixels=1e9,
+        )
+        if stats is None:
+            return None
+        band_value = stats.get(band_name)
+        if band_value is None:
+            return None
+        value = band_value.getInfo()
+    except Exception:
+        return None
     if value is None:
         return None
-    return float(value)
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(numeric_value):
+        return None
+    return numeric_value
+
 
 # ---------------------------------------------------------------------
 # TIER 3: MORPHOLOGY GATE
 # ---------------------------------------------------------------------
+
 
 def box_count_fractal_dimension(binary):
     binary = np.asarray(binary, dtype=bool)
@@ -152,9 +170,7 @@ def box_count_fractal_dimension(binary):
             continue
 
         cropped = binary[:rows, :cols]
-        reduced = cropped.reshape(
-            (rows // size, size, cols // size, size)
-        ).max(axis=(1, 3))
+        reduced = cropped.reshape((rows // size, size, cols // size, size)).max(axis=(1, 3))
         count = int(np.sum(reduced > 0))
         if count > 0:
             valid_sizes.append(size)
@@ -223,9 +239,11 @@ def analyze_structure(data):
         "entropy": float(entropy),
     }
 
+
 # ---------------------------------------------------------------------
 # ENGINE ENTRYPOINT
 # ---------------------------------------------------------------------
+
 
 def run_discovery(name, lat, lon, mean_coherence=None):
     ee = initialize_ee()
@@ -279,9 +297,11 @@ def run_discovery(name, lat, lon, mean_coherence=None):
         **structure,
     )
 
+
 # ---------------------------------------------------------------------
 # JSON PACKAGE OUTPUT
 # ---------------------------------------------------------------------
+
 
 def export_candidate_package(result, filepath):
     with open(filepath, "w", encoding="utf-8") as f:
