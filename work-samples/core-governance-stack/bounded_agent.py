@@ -3,7 +3,7 @@ import json
 from collections.abc import Iterable, Mapping
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Literal, cast
+from typing import Any, Callable, ClassVar, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -14,20 +14,68 @@ MAX_PAYLOAD_BYTES = 1_000_000
 MAX_NESTING_DEPTH = 10
 
 
-class PolicyViolationError(Exception):
+class GovernanceRuntimeError(Exception):
+    """Base structured governance failure with a stable machine-readable payload."""
+
+    category: ClassVar[str] = "runtime"
+    code: ClassVar[str] = "GOVERNANCE_RUNTIME_ERROR"
+
+    def __init__(self, detail: str, code: str | None = None) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.error_code = code or self.code
+
+    def payload(self) -> dict[str, str]:
+        return {"category": self.category, "code": self.error_code, "detail": self.detail}
+
+
+class ExternalDependencyError(GovernanceRuntimeError):
+    category: ClassVar[str] = "external_dependency"
+    code: ClassVar[str] = "EXTERNAL_DEPENDENCY_ERROR"
+
+
+class SerializationError(GovernanceRuntimeError):
+    category: ClassVar[str] = "serialization"
+    code: ClassVar[str] = "SERIALIZATION_ERROR"
+
+
+class CanonicalizationError(GovernanceRuntimeError):
+    category: ClassVar[str] = "canonicalization"
+    code: ClassVar[str] = "CANONICALIZATION_ERROR"
+
+
+class ResourceLimitError(GovernanceRuntimeError):
+    category: ClassVar[str] = "resource_limit"
+    code: ClassVar[str] = "RESOURCE_LIMIT_ERROR"
+
+
+class LexicalPolicyError(GovernanceRuntimeError):
+    category: ClassVar[str] = "lexical_policy"
+    code: ClassVar[str] = "LEXICAL_POLICY_ERROR"
+
+
+class PolicyViolationError(GovernanceRuntimeError):
     """Raised when a request violates an explicit policy rule."""
 
+    category: ClassVar[str] = "policy"
+    code: ClassVar[str] = "POLICY_VIOLATION"
 
-class PayloadLimitError(Exception):
+
+class PayloadLimitError(ResourceLimitError):
     """Raised when a request exceeds deterministic payload limits."""
 
 
-class ToolExecutionError(Exception):
+class ToolExecutionError(GovernanceRuntimeError):
     """Raised when a governed tool cannot be executed safely."""
 
+    code: ClassVar[str] = "TOOL_EXECUTION_ERROR"
 
-class SchemaValidationError(Exception):
+
+class SchemaValidationError(GovernanceRuntimeError):
     """Raised when a request fails schema validation."""
+
+    category: ClassVar[str] = "schema"
+    code: ClassVar[str] = "SCHEMA_VALIDATION_ERROR"
 
 
 class PolicyResult(str, Enum):
@@ -77,12 +125,32 @@ class ActionReceipt(BaseModel):
     approved: bool
 
 
+def _canonical_csv_path(target: str, *, must_exist: bool = False) -> Path:
+    raw_path = Path(target)
+    try:
+        raw_parts = [raw_path, *raw_path.parents]
+        if any(part.exists() and part.is_symlink() for part in raw_parts):
+            raise CanonicalizationError("csv target traverses symlink", code="CSV_SYMLINK_REJECTED")
+        resolved = raw_path.resolve(strict=False)
+    except CanonicalizationError:
+        raise
+    except (OSError, RuntimeError) as exc:
+        raise CanonicalizationError(str(exc), code="CSV_CANONICALIZATION_FAILED") from exc
+    if resolved.suffix != ".csv" or DATA_ROOT not in resolved.parents:
+        raise CanonicalizationError("csv target escapes data root", code="CSV_OUTSIDE_DATA_ROOT")
+    if must_exist and not resolved.exists():
+        raise ExternalDependencyError("csv target does not exist", code="CSV_MISSING")
+    if resolved.exists() and not resolved.is_file():
+        raise CanonicalizationError("csv target is not a file", code="CSV_NOT_FILE")
+    return resolved
+
+
 def _is_allowed_csv(target: str) -> bool:
     try:
-        path = Path(target).resolve()
-    except Exception:
+        _canonical_csv_path(target)
+    except GovernanceRuntimeError:
         return False
-    return path.suffix == ".csv" and DATA_ROOT in path.parents
+    return True
 
 
 def _max_depth(value: Any, depth: int = 0, seen: set[int] | None = None) -> int:
@@ -196,7 +264,7 @@ class BoundedAgent:
         }
 
     def _read_csv_preview(self, target: str) -> dict[str, Any]:
-        path = Path(target).resolve()
+        path = _canonical_csv_path(target)
         if not _is_allowed_csv(str(path)):
             raise PolicyViolationError("target violation")
         if not path.is_file():
@@ -238,8 +306,11 @@ class BoundedAgent:
 
         try:
             result = tool(request.target)
-        except Exception as exc:
-            return {"status": "tool_error", "detail": str(exc)}
+        except GovernanceRuntimeError as exc:
+            return {"status": "tool_error", "detail": str(exc), "error": exc.payload()}
+        except (OSError, ValidationError, TypeError, ValueError) as exc:
+            structured = ToolExecutionError(str(exc))
+            return {"status": "tool_error", "detail": str(exc), "error": structured.payload()}
 
         if result.get("status") == "missing":
             return {

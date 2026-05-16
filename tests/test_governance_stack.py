@@ -1,5 +1,6 @@
 import copy
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -282,3 +283,214 @@ def test_text_scalpel_rejects_repeated_huge_and_syntax_poison_insertions():
         )
     with pytest.raises(SyntaxError, match="syntax validation"):
         module.ScalpelEngine.insert("value = 1", line_number=1, new_code="if True")
+
+
+def test_guardrail_durable_ledger_replays_stably(tmp_path):
+    module = load_module("guardrail_engine_replay_stable", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    payload = {
+        "query": "Calculate liquidity audit report validate reconcile",
+        "context": "audit",
+        "domain": "audit",
+        "timestamp": 7.0,
+    }
+
+    first = module.GuardrailEngine(ledger_path=ledger).process(payload)
+    second = module.GuardrailEngine(ledger_path=ledger).process(payload)
+    replay = module.ReceiptLedger.validate(ledger)
+
+    assert first["status"] == "EXECUTE"
+    assert second["status"] == "EXECUTE"
+    assert first["receipt"]["sequence"] == 0
+    assert second["receipt"]["sequence"] == 1
+    assert second["receipt"]["previous_hash"] == first["receipt"]["receipt_id"]
+    assert replay.valid is True
+    assert replay.next_sequence == 2
+    assert replay.last_hash == second["receipt"]["receipt_id"]
+
+
+def test_guardrail_receipt_reproduction_is_deterministic(tmp_path):
+    module = load_module("guardrail_engine_reproduction", GUARDRAIL_PATH)
+    first_ledger = tmp_path / "first.jsonl"
+    second_ledger = tmp_path / "second.jsonl"
+    payloads = [
+        {
+            "query": "Calculate liquidity audit report validate reconcile",
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 1.0,
+        },
+        {
+            "query": "exploit malware exfiltrate credentials",
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 2.0,
+        },
+    ]
+
+    first_receipts = [module.GuardrailEngine(ledger_path=first_ledger).process(payload)["receipt"] for payload in payloads]
+    second_receipts = [module.GuardrailEngine(ledger_path=second_ledger).process(payload)["receipt"] for payload in payloads]
+
+    assert first_receipts == second_receipts
+    assert first_ledger.read_text(encoding="utf-8") == second_ledger.read_text(encoding="utf-8")
+
+
+def test_guardrail_replay_detects_tampered_ledger_row(tmp_path):
+    module = load_module("guardrail_engine_tamper", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    payload = {
+        "query": "Calculate liquidity audit report validate reconcile",
+        "context": "audit",
+        "domain": "audit",
+        "timestamp": 3.0,
+    }
+    module.GuardrailEngine(ledger_path=ledger).process(payload)
+    row = json.loads(ledger.read_text(encoding="utf-8").splitlines()[0])
+    row["receipt"]["decision"] = "HALT"
+    ledger.write_text(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+
+    with pytest.raises(module.SerializationError, match="ledger row hash mismatch"):
+        module.ReceiptLedger.validate(ledger)
+
+
+def test_guardrail_replay_detects_reordered_receipts(tmp_path):
+    module = load_module("guardrail_engine_reordered", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    payloads = [
+        {
+            "query": "Calculate liquidity audit report validate reconcile",
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 4.0,
+        },
+        {
+            "query": "Calculate liquidity audit report validate reconcile",
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 5.0,
+        },
+    ]
+    for payload in payloads:
+        module.GuardrailEngine(ledger_path=ledger).process(payload)
+    lines = ledger.read_text(encoding="utf-8").splitlines()
+    ledger.write_text("\n".join(reversed(lines)) + "\n", encoding="utf-8")
+
+    with pytest.raises(module.GovernanceRuntimeError, match="receipt sequence discontinuity"):
+        module.ReceiptLedger.validate(ledger)
+
+
+def test_guardrail_replay_detects_duplicate_sequence_ids(tmp_path):
+    module = load_module("guardrail_engine_duplicate", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    payloads = [
+        {
+            "query": "Calculate liquidity audit report validate reconcile",
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 6.0,
+        },
+        {
+            "query": "Calculate liquidity audit report validate reconcile",
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 7.0,
+        },
+    ]
+    for payload in payloads:
+        module.GuardrailEngine(ledger_path=ledger).process(payload)
+    lines = ledger.read_text(encoding="utf-8").splitlines()
+    first_row = json.loads(lines[0])
+    second_row = json.loads(lines[1])
+    second_row["receipt"]["sequence"] = 0
+    second_row["receipt"]["receipt_id"] = module.ReceiptLedger.receipt_hash(
+        module.DecisionReceipt.model_validate(second_row["receipt"])
+    )
+    second_row["row_hash"] = module.ReceiptLedger.row_hash(second_row["receipt"])
+    ledger.write_text(
+        json.dumps(first_row, sort_keys=True, separators=(",", ":"))
+        + "\n"
+        + json.dumps(second_row, sort_keys=True, separators=(",", ":"))
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(module.GovernanceRuntimeError, match="receipt sequence discontinuity"):
+        module.ReceiptLedger.validate(ledger)
+
+
+def test_guardrail_replay_detects_truncated_ledger_file(tmp_path):
+    module = load_module("guardrail_engine_truncated", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    payload = {
+        "query": "Calculate liquidity audit report validate reconcile",
+        "context": "audit",
+        "domain": "audit",
+        "timestamp": 8.0,
+    }
+    module.GuardrailEngine(ledger_path=ledger).process(payload)
+    ledger.write_text(ledger.read_text(encoding="utf-8").rstrip("\n"), encoding="utf-8")
+
+    with pytest.raises(module.SerializationError, match="ledger row is truncated"):
+        module.ReceiptLedger.validate(ledger)
+
+
+def test_guardrail_replay_detects_malformed_canonical_serialization(tmp_path):
+    module = load_module("guardrail_engine_noncanonical", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    payload = {
+        "query": "Calculate liquidity audit report validate reconcile",
+        "context": "audit",
+        "domain": "audit",
+        "timestamp": 9.0,
+    }
+    module.GuardrailEngine(ledger_path=ledger).process(payload)
+    row = json.loads(ledger.read_text(encoding="utf-8").splitlines()[0])
+    ledger.write_text(json.dumps(row, sort_keys=False, indent=0) + "\n", encoding="utf-8")
+
+    with pytest.raises(module.SerializationError):
+        module.ReceiptLedger.validate(ledger)
+
+
+def test_guardrail_does_not_mutate_payload_and_recursive_payload_fails_closed():
+    module = load_module("guardrail_engine_immutable", GUARDRAIL_PATH)
+    payload = {
+        "query": "Calculate liquidity audit report validate reconcile",
+        "context": "audit",
+        "domain": "audit",
+        "timestamp": 10.0,
+    }
+    original_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    result = module.GuardrailEngine().process(payload)
+
+    assert result["status"] == "EXECUTE"
+    assert json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8") == original_bytes
+
+    recursive = {"query": "Calculate liquidity audit report", "context": "audit", "domain": "audit", "timestamp": 11.0}
+    recursive["self"] = recursive
+    denied = module.GuardrailEngine().process(recursive)
+
+    assert denied["status"] == "HALT"
+    assert denied["error"]["category"] in {"resource_limit", "serialization"}
+
+
+def test_guardrail_audit_log_records_redacted_policy_denial(tmp_path):
+    module = load_module("guardrail_engine_audit", GUARDRAIL_PATH)
+    audit_log = tmp_path / "audit.jsonl"
+    denied = module.GuardrailEngine(audit_log_path=audit_log).process(
+        {
+            "query": "exploit malware exfiltrate credentials",
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 12.0,
+        }
+    )
+
+    assert denied["status"] == "HALT"
+    assert module.DeterministicAuditLog.validate(audit_log) == 1
+    row = json.loads(audit_log.read_text(encoding="utf-8"))
+    assert row["event_type"] == "policy_denial"
+    assert row["code"] == "INSUFFICIENT_CONFIDENCE"
+    assert "input_hash" in row
+    assert "receipt_id" in row
+    assert "query" not in row
+    assert "payload" not in row
