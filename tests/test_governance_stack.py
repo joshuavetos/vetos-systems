@@ -328,8 +328,14 @@ def test_guardrail_receipt_reproduction_is_deterministic(tmp_path):
         },
     ]
 
-    first_receipts = [module.GuardrailEngine(ledger_path=first_ledger).process(payload)["receipt"] for payload in payloads]
-    second_receipts = [module.GuardrailEngine(ledger_path=second_ledger).process(payload)["receipt"] for payload in payloads]
+    first_receipts = [
+        module.GuardrailEngine(ledger_path=first_ledger).process(payload)["receipt"]
+        for payload in payloads
+    ]
+    second_receipts = [
+        module.GuardrailEngine(ledger_path=second_ledger).process(payload)["receipt"]
+        for payload in payloads
+    ]
 
     assert first_receipts == second_receipts
     assert first_ledger.read_text(encoding="utf-8") == second_ledger.read_text(encoding="utf-8")
@@ -347,7 +353,9 @@ def test_guardrail_replay_detects_tampered_ledger_row(tmp_path):
     module.GuardrailEngine(ledger_path=ledger).process(payload)
     row = json.loads(ledger.read_text(encoding="utf-8").splitlines()[0])
     row["receipt"]["decision"] = "HALT"
-    ledger.write_text(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+    ledger.write_text(
+        json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
 
     with pytest.raises(module.SerializationError, match="ledger row hash mismatch"):
         module.ReceiptLedger.validate(ledger)
@@ -463,9 +471,16 @@ def test_guardrail_does_not_mutate_payload_and_recursive_payload_fails_closed():
     result = module.GuardrailEngine().process(payload)
 
     assert result["status"] == "EXECUTE"
-    assert json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8") == original_bytes
+    assert (
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8") == original_bytes
+    )
 
-    recursive = {"query": "Calculate liquidity audit report", "context": "audit", "domain": "audit", "timestamp": 11.0}
+    recursive = {
+        "query": "Calculate liquidity audit report",
+        "context": "audit",
+        "domain": "audit",
+        "timestamp": 11.0,
+    }
     recursive["self"] = recursive
     denied = module.GuardrailEngine().process(recursive)
 
@@ -494,3 +509,109 @@ def test_guardrail_audit_log_records_redacted_policy_denial(tmp_path):
     assert "receipt_id" in row
     assert "query" not in row
     assert "payload" not in row
+
+
+def test_guardrail_rejects_symlinked_and_circular_ledger_paths(tmp_path):
+    module = load_module("guardrail_engine_symlink_paths", GUARDRAIL_PATH)
+    real_ledger = tmp_path / "real.jsonl"
+    symlink_ledger = tmp_path / "linked.jsonl"
+    circular_ledger = tmp_path / "circular.jsonl"
+    symlink_ledger.symlink_to(real_ledger)
+    circular_ledger.symlink_to(circular_ledger)
+
+    with pytest.raises(module.CanonicalizationError, match="symlinks"):
+        module.ReceiptLedger(symlink_ledger)
+    with pytest.raises(module.CanonicalizationError, match="symlinks"):
+        module.ReceiptLedger(circular_ledger)
+
+
+def test_guardrail_audit_rejects_nested_raw_payload_keys(tmp_path):
+    module = load_module("guardrail_engine_nested_audit", GUARDRAIL_PATH)
+    audit_log = tmp_path / "audit.jsonl"
+    row = {
+        "event_type": "runtime_failure",
+        "sequence": 0,
+        "category": "runtime",
+        "code": "BAD",
+        "detail": {"nested": {"raw_query": "secret"}},
+    }
+    audit_log.write_text(
+        json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(module.GovernanceRuntimeError, match="raw payload"):
+        module.DeterministicAuditLog.validate(audit_log)
+
+
+def test_guardrail_float_normalization_replay_stability(tmp_path):
+    module = load_module("guardrail_engine_float_normalized", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    payload = {
+        "query": "Calculate liquidity audit report validate reconcile",
+        "context": "audit",
+        "domain": "audit",
+        "timestamp": 1.123456789,
+    }
+
+    result = module.GuardrailEngine(ledger_path=ledger).process(payload)
+    replay = module.ReceiptLedger.validate(ledger, include_receipts=True)
+
+    assert result["receipt"]["timestamp"] == 1.123457
+    assert result["receipt"]["confidence_score"] == round(result["receipt"]["confidence_score"], 8)
+    assert replay.receipts[0].timestamp == 1.123457
+    assert replay.receipts[0].receipt_id == result["receipt"]["receipt_id"]
+
+
+def test_guardrail_append_rejects_existing_lock_file(tmp_path):
+    module = load_module("guardrail_engine_append_lock", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    (tmp_path / "receipts.jsonl.lock").write_text("occupied", encoding="utf-8")
+
+    result = module.GuardrailEngine(ledger_path=ledger).process(
+        {
+            "query": "Calculate liquidity audit report validate reconcile",
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 13.0,
+        }
+    )
+
+    assert result["status"] == "HALT"
+    assert result["error"]["code"] == "APPEND_LOCK_HELD"
+    assert not ledger.exists()
+
+
+def test_guardrail_rejects_oversized_audit_events(tmp_path):
+    module = load_module("guardrail_engine_oversized_audit", GUARDRAIL_PATH)
+    audit_log = tmp_path / "audit.jsonl"
+    logger = module.DeterministicAuditLog(audit_log)
+
+    with pytest.raises(module.ResourceLimitError, match="audit event byte ceiling"):
+        logger.append(
+            "runtime_failure",
+            {"category": "runtime", "code": "BIG", "detail": "x" * module.AUDIT_EVENT_BYTES},
+        )
+
+
+def test_guardrail_replay_detects_malformed_utf8_ledger_row(tmp_path):
+    module = load_module("guardrail_engine_bad_utf8", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    ledger.write_bytes(b"\xff\n")
+
+    with pytest.raises(module.SerializationError, match="utf-8"):
+        module.ReceiptLedger.validate(ledger)
+
+
+def test_guardrail_rejects_giant_token_attack_strings():
+    module = load_module("guardrail_engine_giant_token", GUARDRAIL_PATH)
+    result = module.GuardrailEngine().process(
+        {
+            "query": "x" * (module.MAX_QUERY_BYTES + 1),
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 14.0,
+        }
+    )
+
+    assert result["status"] == "HALT"
+    assert result["error"]["code"] == "PAYLOAD_STRING_TOO_LARGE"

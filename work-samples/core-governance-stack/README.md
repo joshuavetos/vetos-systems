@@ -21,7 +21,7 @@ The VETOS engine was backtested against the S&P 500 (2005–2026) using recursiv
 ### Systemic Safety Interlocks
 - **Recursive Vol-Targeting:** Scales exposure as `target_vol / current_vol` to prevent cliff-edge drawdowns.
 - **The Bond Trap:** A deterministic kill-switch that moves to 0% exposure when the Dollar-Equity correlation signals a systemic liquidity collapse.
-- **Auditable Lineage:** Every risk-scaling event is cryptographically logged to the `audit_pipeline`.
+- **Auditable Lineage:** Every risk-scaling event is recorded with deterministic lineage metadata in the `audit_pipeline`; historical immutability requires an external anchor or immutable storage layer.
 ## 📊 Validated Performance (2018–2026 Out-of-Sample)
 
 The engine was calibrated on 2005–2017 data (In-Sample) and validated against a "blind" 2018–2026 dataset (Out-of-Sample).
