@@ -1,6 +1,3 @@
-import re
-import ast
-
 class ScalpelEngine:
     @staticmethod
     def insert(source_code, anchor_text=None, new_code="", position='after', line_number=None):
@@ -12,18 +9,25 @@ class ScalpelEngine:
         target_index = -1
         indent = ""
 
+        if position not in {"before", "after"}:
+            raise ValueError("position must be either 'before' or 'after'.")
+
         # 1. Determine target index and indentation
         if line_number is not None:
-            # Line number is 1-based index
-            target_index = max(0, min(line_number - 1, len(lines) - 1))
-            target_line = lines[target_index]
-            current_indent = target_line[:len(target_line) - len(target_line.lstrip())]
-            
-            # Auto-indent logic: increase indent if inserting after a colon
-            if position == 'after' and target_line.rstrip().endswith(':'):
-                indent = current_indent + "    "
+            # Line number is 1-based index. Empty source buffers are valid
+            # insertion targets and use column-zero indentation.
+            if lines:
+                target_index = max(0, min(line_number - 1, len(lines) - 1))
+                target_line = lines[target_index]
+                current_indent = target_line[:len(target_line) - len(target_line.lstrip())]
+
+                # Auto-indent logic: increase indent if inserting after a colon
+                if position == 'after' and target_line.rstrip().endswith(':'):
+                    indent = current_indent + "    "
+                else:
+                    indent = current_indent
             else:
-                indent = current_indent
+                target_index = -1 if position == 'after' else 0
         elif anchor_text:
             for i, line in enumerate(lines):
                 if anchor_text in line:
@@ -36,7 +40,7 @@ class ScalpelEngine:
             raise ValueError("Either anchor_text or line_number must be provided.")
 
         # 2. Prepare the indented payload
-        indented_lines = [(f"{indent}{l}" if l.strip() else l) for l in new_code.splitlines()]
+        indented_lines = [(f"{indent}{line}" if line.strip() else line) for line in new_code.splitlines()]
         indented_block = "\n".join(indented_lines)
 
         # 3. Perform insertion

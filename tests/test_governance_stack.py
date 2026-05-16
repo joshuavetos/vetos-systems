@@ -11,6 +11,9 @@ GUARDRAIL_PATH = (
     REPO_ROOT / "work-samples" / "core-governance-stack" / "guardrail_engine.py"
 )
 GEO_PATH = REPO_ROOT / "tools" / "geospatial-discovery-engine" / "discovery_engine.py"
+TEXT_SCALPEL_CORE_PATH = (
+    REPO_ROOT / "work-samples" / "text-scalpel" / "src" / "text_scalpel" / "core.py"
+)
 
 
 def load_module(name, path):
@@ -83,3 +86,22 @@ def test_validate_mean_coherence_rejects_non_finite_values():
     assert module.validate_mean_coherence(float("inf")) is False
     assert module.validate_mean_coherence(0.39) is False
     assert module.validate_mean_coherence(0.4) is True
+
+
+def test_text_scalpel_inserts_into_empty_source_buffer():
+    module = load_module("text_scalpel_core_empty", TEXT_SCALPEL_CORE_PATH)
+
+    result = module.ScalpelEngine.insert("", line_number=1, new_code="value = 1")
+
+    assert result == "value = 1"
+
+
+def test_text_scalpel_rejects_unknown_position():
+    module = load_module("text_scalpel_core_bad_position", TEXT_SCALPEL_CORE_PATH)
+
+    try:
+        module.ScalpelEngine.insert("value = 1", line_number=1, new_code="next_value = 2", position="middle")
+    except ValueError as exc:
+        assert "position must be either" in str(exc)
+    else:
+        raise AssertionError("ScalpelEngine.insert accepted an invalid position")

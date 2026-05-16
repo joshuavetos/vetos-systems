@@ -10,12 +10,11 @@ import argparse
 import json
 import os
 import re
-import sys
 import unicodedata
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 TOOL_VERSION = "1.6.0"
 TELEMETRY_SCHEMA_VERSION = "doc_gate_telemetry_v1"

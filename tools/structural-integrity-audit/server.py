@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import torch
 import json
-import chardet
 from PIL import Image
 from scipy import stats
 from fpdf import FPDF
@@ -48,7 +47,8 @@ def run_audit(files):
                 report["verdict"] = "HOLDS" if outliers < (len(df) * 0.05) else "FAILS (HIGH DRIFT)"
             elif name.endswith(('.pt', '.pth')):
                 state = torch.load(path, map_location="cpu", weights_only=True)
-                if hasattr(state, 'state_dict'): state = state.state_dict()
+                if hasattr(state, 'state_dict'):
+                    state = state.state_dict()
                 nan_layers = [k for k, v in state.items() if isinstance(v, torch.Tensor) and torch.isnan(v).any()]
                 report["checks"].append({"nan_layers_detected": len(nan_layers), "total_keys": len(state)})
                 report["verdict"] = "HOLDS" if not nan_layers else "FAILS (CORRUPT WEIGHTS)"

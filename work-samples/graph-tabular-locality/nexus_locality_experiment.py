@@ -15,7 +15,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
-from torch_geometric.data import Data
 from sklearn.neighbors import NearestNeighbors
 from sklearn.decomposition import PCA
 from sklearn.metrics import r2_score, mean_absolute_error

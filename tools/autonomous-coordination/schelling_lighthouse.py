@@ -45,7 +45,8 @@ class LighthouseAgent:
             direction = target - curr
             dist = np.linalg.norm(direction)
             
-            if dist < 0.5: break # High-precision arrival
+            if dist < 0.5:
+                break # High-precision arrival
             
             # Step size scaled to world size for faster traversal
             step_size = max(2, self.world_size // 15)

@@ -1,5 +1,4 @@
-from z3 import *
-import json
+from z3 import Implies, Int, Solver, String, StringVal, unsat
 import time
 
 class IndustrialGovernor:

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import re
-import json
-import hashlib
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from dataclasses import dataclass
+from typing import List, Dict
 from datetime import date, datetime
 
 
@@ -57,13 +55,16 @@ class FilingAuditor:
         
     def _resolve_year_token(self, token: str, reference_date: date) -> int:
         clean_token = re.sub(r"\D", "", token)
-        if not clean_token: raise ValueError("Empty token")
-        if len(clean_token) == 4: return int(clean_token)
+        if not clean_token:
+            raise ValueError("Empty token")
+        if len(clean_token) == 4:
+            return int(clean_token)
         if len(clean_token) == 2:
             pivot_year = reference_date.year
             century = (pivot_year // 100) * 100
             year_val = century + int(clean_token)
-            if year_val > pivot_year + 20: year_val -= 100
+            if year_val > pivot_year + 20:
+                year_val -= 100
             return year_val
         raise ValueError(f"Ambiguous: {token}")
 
@@ -89,23 +90,29 @@ class FilingAuditor:
             g = match.groupdict()
             try:
                 val = float(g['value'].replace(",", ""))
-                if g['sign'] == '-': val = -val
-                if g['unit']: val *= multipliers.get(g['unit'].lower(), 1)
+                if g['sign'] == '-':
+                    val = -val
+                if g['unit']:
+                    val *= multipliers.get(g['unit'].lower(), 1)
                 
                 # Memory-safe line extraction
                 start = text.rfind('\n', 0, match.start()) + 1
                 end = text.find('\n', match.end())
-                if end == -1: end = len(text)
+                if end == -1:
+                    end = len(text)
                 snippet = text[start:end].strip()
-                if len(snippet) > 500: snippet = f"{snippet[:250]} [...] {snippet[-250:]}"
+                if len(snippet) > 500:
+                    snippet = f"{snippet[:250]} [...] {snippet[-250:]}"
                 
                 results.append({'amount': val, 'snippet': snippet})
-            except (ValueError, TypeError): continue
+            except (ValueError, TypeError):
+                continue
         return results
 
     def audit_filing(self, filing: Filing):
         text = str(filing.processed_text)
-        if not text: return
+        if not text:
+            return
         is_outlook = any(kw in text.lower() for kw in ['outlook', 'forecast', 'projection', 'planned'])
         max_yr_limit = 2200 if is_outlook else 2100
         reference_date = self._normalize_reference_date(filing.accepted_date)
@@ -124,11 +131,13 @@ class FilingAuditor:
             try:
                 yr = self._resolve_year_token(root_part, reference_date)
                 if 1900 <= yr <= max_yr_limit:
-                    if yr in self.coverage: self.coverage[yr] = 1
+                    if yr in self.coverage:
+                        self.coverage[yr] = 1
                     self.telemetry.update_stats(filing.identifier, filing.filing_type, 1)
                 else:
                     self.telemetry.log_rejection({"year": yr, "filing_id": filing.identifier, "filing_type": filing.filing_type, "context": "out_of_bounds"})
-            except (ValueError, TypeError): continue
+            except (ValueError, TypeError):
+                continue
 
         # 3. Currency Audit
         for info in currency_info:
