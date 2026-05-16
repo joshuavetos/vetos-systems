@@ -31,7 +31,7 @@ Policy decisions are based on typed schemas, canonical paths, stable JSON serial
 
 ## Deterministic serialization rules
 
-Canonical governance serialization uses JSON with sorted keys, no NaN or Infinity values, compact separators, and pre-serialization float quantization for receipt timestamps and confidence scores. Payloads that cannot be serialized canonically fail closed. Ledger rows and audit rows must be stored in exactly canonical form; replay rejects rows that parse successfully but are not byte-equivalent to canonical serialization.
+Canonical governance serialization uses JSON with sorted keys, no NaN or Infinity values, compact separators, and Decimal-based pre-serialization float quantization for receipt timestamps and confidence scores. Payloads that cannot be serialized canonically fail closed. Ledger rows, audit rows, and advisory lock metadata must be stored in exactly canonical form; replay rejects rows that parse successfully but are not byte-equivalent to canonical serialization.
 
 ## Receipt replay model
 
@@ -41,15 +41,15 @@ A durable ledger stores one canonical JSON object per line. Each row contains th
 
 ## Durable lineage guarantees
 
-Receipt persistence is append-only JSONL on the local filesystem with a fail-closed advisory lock file to reject concurrent append attempts. Appends use the validated cached tail state when the ledger size is unchanged and revalidate if the file changed out of band, avoiding full post-append replay on every receipt. Replay fails closed on malformed JSON, non-canonical serialization, duplicate sequence identifiers, reordered rows, row-hash mismatch, receipt-hash mismatch, previous-hash mismatch, truncated rows, oversized ledgers, and invalid filesystem targets. This detects lineage inconsistencies within the current ledger state; it is not a substitute for external anchoring, signed checkpoints, immutable storage, or historical notarization.
+Receipt persistence is append-only JSONL on the local filesystem with a fail-closed advisory lock file to reject concurrent append attempts. Lock files are hidden siblings derived deterministically from the governed path, contain the owner PID and monotonic creation timestamp, reject malformed or future-dated metadata, and may be recovered only after the deterministic stale-lock timeout when the owner PID can be verified as absent. Ambiguous lock ownership, unsupported PID verification, or ambiguous cleanup state fails closed. Appends use the validated cached tail state when the ledger size is unchanged and revalidate if the file changed out of band, avoiding full post-append replay on every receipt. Replay fails closed on malformed JSON, non-canonical serialization, duplicate sequence identifiers, reordered rows, row-hash mismatch, receipt-hash mismatch, previous-hash mismatch, truncated rows, oversized ledgers, and invalid filesystem targets. This detects lineage inconsistencies within the current ledger state; it is not a substitute for external anchoring, signed checkpoints, immutable storage, or historical notarization.
 
 ## Filesystem trust boundaries
 
-Filesystem governance canonicalizes local paths before use. CSV tool targets must resolve under the configured data root and retain a `.csv` suffix. Ledger and audit paths must have existing directory parents and may not be symlinks, including broken or circular symlink leaf paths. Ambiguous paths, directory escapes, broken filesystem assumptions, and symlink traversal are rejected deterministically rather than normalized into permissive access. These checks reduce path confusion but do not claim fd-based race-free secure-open semantics.
+Filesystem governance canonicalizes local paths before use. CSV tool targets must resolve under the configured data root and retain a `.csv` suffix. Ledger and audit paths must have existing directory parents and may not be symlinks, including broken or circular symlink leaf paths. Ambiguous paths, directory escapes, broken filesystem assumptions, and symlink traversal are rejected deterministically rather than normalized into permissive access. These checks reduce path confusion but do not claim fd-based race-free secure-open semantics. The advisory lock is a local coordination mechanism for cooperative writers; it does not provide distributed locking, kernel-enforced mandatory locking, fd-level append proofs across all filesystems, or protection from privileged local mutation. Deployments that require historical immutability should place ledgers on immutable storage or externally anchored append-only media.
 
 ## Runtime resource governance
 
-Governed action and guardrail payloads enforce byte ceilings, recursion-depth ceilings, object-count ceilings, per-string byte ceilings, and container-fanout ceilings before schema validation or policy execution. Row-query governance enforces supplied-row and query-limit ceilings. Ledger and audit files enforce byte ceilings, and audit events enforce a per-event size ceiling. Non-finite numeric values fail canonical serialization and halt deterministically.
+Governed action and guardrail payloads enforce byte ceilings, recursion-depth ceilings, object-count ceilings, per-string byte ceilings, container-fanout ceilings, recursion rejection, and JSON compatibility in one deterministic traversal before schema validation or policy execution. Row-query governance enforces supplied-row and query-limit ceilings. Ledger and audit files enforce byte ceilings, and audit events enforce a per-event size ceiling. Non-finite numeric values fail canonical serialization and halt deterministically.
 
 ## Lexical policy model
 
@@ -59,11 +59,11 @@ No NLP frameworks, machine-learning models, embeddings, network services, or pro
 
 ## Audit logging model
 
-Audit logging is local, deterministic, append-only JSONL with the same fail-closed advisory lock semantics as receipt appends. Audit rows use canonical serialization, monotonic sequence numbers, explicit event-type allowlists, and redaction-safe event fields. The audit log records policy denials and runtime failures without raw prompt, context, or payload content. Validation rejects truncated rows, malformed JSON, non-canonical rows, sequence discontinuities, oversized logs, non-allowlisted fields, and rows that contain forbidden raw payload keys at any nesting level.
+Audit logging is local, deterministic, append-only JSONL with the same fail-closed advisory lock semantics as receipt appends. Audit rows use canonical serialization, monotonic sequence numbers, explicit event-type field schemas, and redaction-safe event fields. The audit log records policy denials and runtime failures without raw prompt, context, or payload content. Validation rejects truncated rows, malformed JSON, non-canonical rows, sequence discontinuities, oversized logs, unknown fields, missing required fields, wrong field types, and rows that contain forbidden raw payload keys at any nesting level, including list, tuple, and set nesting encountered before canonical serialization.
 
 ## Replay verification semantics
 
-Replay validation is an enforcement mechanism, not a diagnostic-only utility. A replay violation prevents ledger startup or append from continuing. This preserves deterministic fail-closed semantics for receipt lineage and prevents the engine from silently building on corrupted state.
+Replay validation is an enforcement mechanism, not a diagnostic-only utility. A replay violation prevents ledger startup or append from continuing. Ledger replay iterates line-by-line and does not accumulate receipt objects unless receipt inclusion is explicitly requested. This preserves deterministic fail-closed semantics for receipt lineage and prevents the engine from silently building on corrupted state.
 
 ## Schema contracts
 
