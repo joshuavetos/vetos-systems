@@ -1,14 +1,20 @@
 import hashlib
 import json
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import numpy as np
-from pydantic import BaseModel, Field, validator
-from scipy.special import softmax
+from pydantic import BaseModel, Field, field_validator
 
 # --- Configuration ---
 CONFIDENCE_THRESHOLD = 0.92  # High bar for "Fail-Closed"
 DOMAIN_WHITELIST = ["financial", "industrial", "audit"]
+
+
+def softmax(logits: np.ndarray) -> np.ndarray:
+    """Compute a numerically stable softmax without external dependencies."""
+    shifted = logits - np.max(logits)
+    exp_values = np.exp(shifted)
+    return exp_values / np.sum(exp_values)
 
 class InputSchema(BaseModel):
     query: str
@@ -16,7 +22,8 @@ class InputSchema(BaseModel):
     domain: str
     timestamp: float = Field(default_factory=time.time)
 
-    @validator("domain")
+    @field_validator("domain")
+    @classmethod
     def domain_must_be_whitelisted(cls, v):
         if v not in DOMAIN_WHITELIST:
             raise ValueError(f"Domain '{v}' not in whitelist: {DOMAIN_WHITELIST}")
@@ -38,15 +45,64 @@ class GuardrailEngine:
         serialized = json.dumps(data, sort_keys=True).encode()
         return hashlib.sha256(serialized).hexdigest()
 
-    def _mock_inference_logits(self, text: str) -> np.ndarray:
+    def _deterministic_inference_logits(self, text: str) -> np.ndarray:
+        """Return deterministic safety logits derived from auditable text features.
+
+        The guardrail work sample does not bundle a model checkpoint, so the
+        confidence gate uses explicit lexical and structural risk signals instead
+        of random values.  The three logits are ordered as
+        [safe, ambiguous, unsafe].
         """
-        In production, this comes from the LLM. 
-        Here, we simulate logits based on input length/entropy to be deterministic.
-        """
-        seed = int(hashlib.sha256(text.encode()).hexdigest(), 16) % (2**32)
-        np.random.seed(seed)
-        # Simulate 3 classes: [Safe, Ambiguous, Unsafe]
-        return np.random.normal(0, 1.5, 3)
+        normalized = text.lower()
+        tokens = [token for token in normalized.replace("_", " ").split() if token]
+        token_count = max(len(tokens), 1)
+        unique_ratio = len(set(tokens)) / token_count
+        digit_ratio = sum(ch.isdigit() for ch in text) / max(len(text), 1)
+        punctuation_count = sum(
+            not ch.isalnum() and not ch.isspace() for ch in text
+        )
+        punctuation_ratio = punctuation_count / max(len(text), 1)
+
+        safe_terms = {
+            "audit",
+            "calculate",
+            "liquidity",
+            "validate",
+            "reconcile",
+            "report",
+        }
+        unsafe_terms = {
+            "bypass",
+            "exploit",
+            "exfiltrate",
+            "disable",
+            "weaponize",
+            "malware",
+        }
+        ambiguous_terms = {
+            "maybe",
+            "guess",
+            "unknown",
+            "private",
+            "secret",
+            "credential",
+        }
+
+        safe_hits = sum(term in tokens for term in safe_terms)
+        unsafe_hits = sum(term in tokens for term in unsafe_terms)
+        ambiguous_hits = sum(term in tokens for term in ambiguous_terms)
+
+        safe_logit = (
+            0.25 + 0.9 * safe_hits + 0.4 * unique_ratio - 2.0 * unsafe_hits
+        )
+        ambiguous_logit = (
+            0.1
+            + 0.7 * ambiguous_hits
+            + punctuation_ratio
+            + abs(token_count - 8) / 20
+        )
+        unsafe_logit = -0.3 + 1.4 * unsafe_hits + 0.8 * ambiguous_hits + digit_ratio
+        return np.array([safe_logit, ambiguous_logit, unsafe_logit], dtype=float)
 
     def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -60,7 +116,7 @@ class GuardrailEngine:
             return {"error": f"Schema Validation Failed: {str(e)}", "status": "HALT"}
 
         # 2. Epistemic Confidence Check (Softmax)
-        logits = self._mock_inference_logits(clean_input.query)
+        logits = self._deterministic_inference_logits(clean_input.query)
         probs = softmax(logits)
         confidence = float(np.max(probs))
 
@@ -72,7 +128,9 @@ class GuardrailEngine:
         # 4. Cryptographic Receipt Emission
         input_hash = self._compute_hash(payload)
         receipt = DecisionReceipt(
-            receipt_id=hashlib.sha256(f"{input_hash}{time.time()}".encode()).hexdigest(),
+            receipt_id=hashlib.sha256(
+                f"{input_hash}{time.time()}".encode()
+            ).hexdigest(),
             input_hash=input_hash,
             confidence_score=confidence,
             decision=decision,

@@ -47,7 +47,7 @@ APIS = [
         "name": "Twitter/X",
         "stimuli": {
             "auth": "https://api.twitter.com/2/users/me",
-            "malformed": "https://api.twitter.com/2/this_is_fake"
+            "malformed": "https://api.twitter.com/2/this_endpoint_does_not_exist"
         }
     },
     {

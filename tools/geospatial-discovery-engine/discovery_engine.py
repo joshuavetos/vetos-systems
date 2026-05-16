@@ -114,11 +114,25 @@ def validate_mean_coherence(mean_coherence):
     return value >= COHERENCE_FLOOR
 
 
-def compute_mean_coherence(point, orbit):
-    raise NotImplementedError(
-        "Mean coherence requires a completed InSAR coherence product; "
-        "pass its numeric mean to run_discovery(mean_coherence=...)."
+def compute_mean_coherence(coherence_image, geometry, scale=20, band_name="coherence"):
+    """Compute mean coherence from a prepared Earth Engine coherence image.
+
+    The repository does not include an InSAR processor, but it can audit a
+    completed coherence raster.  The caller supplies the prepared
+    ``coherence_image`` and the Earth Engine ``geometry`` to reduce; this
+    function performs the numeric reduction consumed by ``run_discovery``.
+    """
+    ee = _require_earth_engine()
+    stats = coherence_image.reduceRegion(
+        reducer=ee.Reducer.mean(),
+        geometry=geometry,
+        scale=scale,
+        maxPixels=1e9,
     )
+    value = stats.get(band_name).getInfo()
+    if value is None:
+        return None
+    return float(value)
 
 # ---------------------------------------------------------------------
 # TIER 3: MORPHOLOGY GATE
