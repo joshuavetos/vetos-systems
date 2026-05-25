@@ -490,9 +490,8 @@ class ReceiptLedger:
                 "receipt hash mismatch", code="LEDGER_APPEND_HASH_MISMATCH"
             )
         with _exclusive_lock(self.path):
-            current_size = self.path.stat().st_size if self.path.exists() else 0
-            if current_size != self._state.ledger_size:
-                self._state = self.validate(self.path)
+            self._state = self.validate(self.path)
+            current_size = self._state.ledger_size
             if (
                 receipt.sequence != self._state.next_sequence
                 or receipt.previous_hash != self._state.last_hash

@@ -581,6 +581,41 @@ def test_guardrail_append_rejects_existing_lock_file(tmp_path):
     assert not ledger.exists()
 
 
+
+
+def test_guardrail_append_revalidates_on_same_size_tamper(tmp_path):
+    module = load_module("guardrail_engine_same_size_tamper", GUARDRAIL_PATH)
+    ledger = tmp_path / "receipts.jsonl"
+    engine = module.GuardrailEngine(ledger_path=ledger)
+
+    first = engine.process(
+        {
+            "query": "Calculate liquidity audit report validate reconcile",
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 15.0,
+        }
+    )
+    assert first["status"] == "EXECUTE"
+
+    original_row = ledger.read_text(encoding="utf-8")
+    tampered_row = original_row.replace('"sequence":0', '"sequence":9')
+    assert len(tampered_row.encode("utf-8")) == len(original_row.encode("utf-8"))
+    ledger.write_text(tampered_row, encoding="utf-8")
+
+    second = engine.process(
+        {
+            "query": "Calibrate policy threshold and validate override",
+            "context": "audit",
+            "domain": "audit",
+            "timestamp": 16.0,
+        }
+    )
+
+    assert second["status"] == "HALT"
+    assert second["error"]["code"] == "LEDGER_ROW_HASH_MISMATCH"
+
+
 def test_guardrail_rejects_oversized_audit_events(tmp_path):
     module = load_module("guardrail_engine_oversized_audit", GUARDRAIL_PATH)
     audit_log = tmp_path / "audit.jsonl"
