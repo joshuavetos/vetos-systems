@@ -78,15 +78,15 @@ These are useful experiments but are not required for the flagship deterministic
 - **Medium**: removing old modules may break imports in ad-hoc scripts.
 - **High**: changing receipt schema without fixture/test migration.
 
-## Renaming table (planned)
+## Terminology cleanup (planned)
 
 | Old name | New name |
 |---|---|
-| `failure_oracle` | `artifact_verifier` |
-| `semantic_auditor_v3_3` | `ticket_validator` |
+| `failure_oracle` | `artifact_checker` |
+| `semantic_auditor_v3_3` | `support_ticket_checker` |
 | `core-governance-stack` | `deterministic-guards` |
-| `guardrail_engine` | `refusal_gate` |
-| `audit_pipeline` | `deterministic_audit_runner` |
+| `guardrail_engine` | `validation_gate` |
+| `audit_pipeline` | `deterministic_audit_job` |
 
 ## Minimal MVP definition
 
@@ -120,7 +120,7 @@ If a feature does not enforce a concrete invariant in deterministic execution or
 ## What is implemented now
 
 - Deterministic funding audit with schema validation and entropy veto.
-- Deterministic artifact verification with explicit availability checks.
+- Deterministic artifact check with explicit availability checks.
 - Deterministic/refusal behavior tested with fixed fixtures.
 
 ## What is intentionally not implemented
@@ -151,7 +151,7 @@ python tools/funding-analysis/audit_pipeline.py \
   --input-json samples/sample_funding_payload.json
 ```
 
-Run deterministic artifact verification:
+Run deterministic artifact check:
 
 ```bash
 FAILURE_ORACLE_SEED=2026 FAILURE_ORACLE_SKIP_DOCKER=1 \
@@ -159,14 +159,14 @@ python work-samples/failure_oracle.py \
   --artifact-path work-samples/failure_oracle.py
 ```
 
-## Verify
+## Verification checks
 
 Verification is successful when:
 - tests pass,
 - fixture-based outputs are stable,
 - failure paths are explicit (exception, `HALT`, or `SKIP`) rather than silently corrected.
 
-## Known limits
+## Known limitations
 
 - Some repository directories remain experimental and use legacy naming.
 - The current test matrix is Python-focused and does not include multi-runtime conformance.
